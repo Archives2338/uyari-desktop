@@ -1,0 +1,261 @@
+/* Layout base de la app de escritorio. Tema oscuro por defecto usando los
+   tokens del design system (tokens.css se importa antes que este archivo). */
+
+:root {
+  /* Superficies dark derivadas de --ink para la ventana de escritorio */
+  --app-bg: #1b1926;
+  --app-surface: #232030;
+  --app-surface-raised: #2b2839;
+  --app-border: #37334a;
+  --app-text: #f2f1f6;
+  --app-text-muted: #a29ec0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--app-bg);
+  color: var(--app-text);
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+/* Barra de arrastre para la ventana sin título (hiddenInset) */
+.drag-region {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 48px;
+  -webkit-app-region: drag;
+  z-index: 10;
+}
+
+.screen {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.card {
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
+  border-radius: 16px;
+  padding: 48px;
+  width: 560px;
+  max-width: calc(100vw - 96px);
+}
+
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+  margin: 0 0 16px;
+}
+
+.title {
+  font-family: Fraunces, Georgia, serif;
+  font-weight: 500;
+  font-size: 32px;
+  line-height: 1.2;
+  margin: 0 0 12px;
+}
+
+.subtitle {
+  color: var(--app-text-muted);
+  font-size: 15px;
+  margin: 0 0 32px;
+}
+
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--app-bg);
+  border: 1px solid var(--app-border);
+  border-radius: 10px;
+  color: var(--app-text);
+  font: inherit;
+  font-size: 15px;
+  padding: 14px 16px;
+  outline: none;
+}
+
+.input:focus {
+  border-color: var(--violet);
+}
+
+.btn {
+  border: none;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 12px 24px;
+  cursor: pointer;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--app-text-muted);
+  border: 1px solid var(--app-border);
+}
+
+.btn-accent {
+  background: var(--violet);
+  color: #fff;
+}
+
+.footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 40px;
+}
+
+/* Permisos */
+.perm-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+  margin-bottom: 12px;
+}
+
+.perm-row .grow {
+  flex: 1;
+}
+
+.perm-name {
+  font-weight: 600;
+  font-size: 15px;
+  margin: 0 0 2px;
+}
+
+.perm-why {
+  color: var(--app-text-muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.perm-state-granted {
+  color: var(--mint);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+/* Home */
+.home {
+  display: flex;
+  height: 100%;
+}
+
+.sidebar {
+  width: 240px;
+  background: var(--app-surface);
+  border-right: 1px solid var(--app-border);
+  padding: 56px 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-item {
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--app-text-muted);
+  cursor: default;
+}
+
+.sidebar-item.active {
+  background: var(--app-surface-raised);
+  color: var(--app-text);
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  font-size: 12px;
+  color: var(--app-text-muted);
+  padding: 8px 12px;
+}
+
+.main-pane {
+  flex: 1;
+  padding: 64px 48px 32px;
+  overflow-y: auto;
+}
+
+.transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.caption-line {
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.caption-speaker {
+  color: var(--violet);
+  font-weight: 600;
+  margin-right: 8px;
+}
+
+.rec-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e5484d;
+  margin-right: 8px;
+  animation: pulse 1.4s infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.logo-mark {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  margin-bottom: 24px;
+}
+
+.reconnect-note {
+  color: #f5c451;
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+
+.error-text {
+  color: #ff8b8b;
+  font-size: 13px;
+  margin-top: 12px;
+  min-height: 18px;
+}

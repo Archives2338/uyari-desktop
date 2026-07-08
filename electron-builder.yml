@@ -1,0 +1,16 @@
+# Empaquetado macOS. Para distribuir de verdad falta: cuenta Apple Developer
+# ($99/año), firma Developer ID y notarización (ver README §Distribución).
+appId: com.uyari.desktop
+productName: Uyari
+directories:
+  output: dist
+files:
+  - out/**
+  - package.json
+mac:
+  category: public.app-category.productivity
+  icon: resources/icon.png
+  target:
+    - dmg
+  extendInfo:
+    NSMicrophoneUsageDescription: Uyari uses the microphone to capture your side of the meeting.

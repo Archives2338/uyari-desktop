@@ -257,6 +257,8 @@ log("aggregate device creado (id \(aggregateID))")
 
 let systemRate = tapFormat.mSampleRate > 0 ? tapFormat.mSampleRate : 48_000
 let systemDownsampler = Downsampler(sourceRate: systemRate)
+var firstSystemFrame = true
+var firstMicFrame = true
 
 var ioProcID: AudioDeviceIOProcID?
 let ioStatus = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, nil) {
@@ -282,7 +284,13 @@ let ioStatus = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, nil) {
         }
     }
     let pcm = systemDownsampler.process(mono)
-    if !pcm.isEmpty { writer.append(channel: CHANNEL_SYSTEM, samples: pcm) }
+    if !pcm.isEmpty {
+        if firstSystemFrame {
+            firstSystemFrame = false
+            log("canal sistema: primer frame emitido")
+        }
+        writer.append(channel: CHANNEL_SYSTEM, samples: pcm)
+    }
 }
 if ioStatus != noErr || ioProcID == nil { fail("no pude crear el IOProc (err \(ioStatus))") }
 if AudioDeviceStart(aggregateID, ioProcID) != noErr { fail("no pude arrancar el aggregate device") }
@@ -318,7 +326,13 @@ inputNode.installTap(onBus: 0, bufferSize: 2400, format: micFormat) { buffer, _ 
     let frames = Int(buffer.frameLength)
     let mono = Array(UnsafeBufferPointer(start: channelData[0], count: frames))
     let pcm = micDownsampler.process(mono)
-    if !pcm.isEmpty { writer.append(channel: CHANNEL_MIC, samples: pcm) }
+    if !pcm.isEmpty {
+        if firstMicFrame {
+            firstMicFrame = false
+            log("canal mic: primer frame emitido")
+        }
+        writer.append(channel: CHANNEL_MIC, samples: pcm)
+    }
 }
 do {
     try audioEngine.start()

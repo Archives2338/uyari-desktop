@@ -138,15 +138,26 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
       this.rendererMicActive = false
     }
     if (this.helper) {
-      // Cerrar stdin = señal de salida limpia (SIGTERM de respaldo).
+      // ESPERAR a que el helper muera antes de resolver: si el usuario
+      // hace stop→start rápido, dos motores de voz conviviendo dejan mudo
+      // el mic de la sesión nueva.
       const helper = this.helper
       this.helper = null
-      try {
-        helper.stdin.end()
-      } catch {
-        // seguir con el kill
-      }
-      setTimeout(() => helper.kill('SIGTERM'), 1500)
+      await new Promise<void>((resolve) => {
+        const done = (): void => resolve()
+        helper.once('exit', done)
+        try {
+          helper.stdin.end() // salida limpia (EOF)
+        } catch {
+          // seguir con el kill
+        }
+        setTimeout(() => helper.kill('SIGTERM'), 300)
+        setTimeout(() => {
+          helper.removeListener('exit', done)
+          helper.kill('SIGKILL')
+          resolve()
+        }, 1200)
+      })
     }
     await Promise.all([this.you.stop(), this.them.stop()])
     this.emitStatus('idle')

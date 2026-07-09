@@ -78,10 +78,14 @@ if (!app.requestSingleInstanceLock()) {
     createMainWindow()
 
     app.on('second-instance', () => {
+      // La app puede seguir viva sin ventanas (macOS): si relanzan y no
+      // hay ventana, crearla en vez de intentar enfocar la nada.
       const [win] = BrowserWindow.getAllWindows()
       if (win) {
         if (win.isMinimized()) win.restore()
         win.focus()
+      } else {
+        createMainWindow()
       }
     })
 

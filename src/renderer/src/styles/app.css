@@ -376,6 +376,94 @@ body {
   text-align: center;
 }
 
+/* Banner "Meeting detected" (ventana flotante propia, patrón Granola) */
+.det-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 64px;
+  margin: 6px;
+  padding: 0 10px 0 14px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-float);
+  user-select: none;
+}
+
+.det-banner-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.det-banner-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.25;
+}
+
+.det-banner-title {
+  font: var(--label-sm);
+  font-size: 13px;
+  color: var(--text-heading);
+}
+
+.det-banner-label {
+  font: var(--text-xs);
+  font-weight: 400;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.det-banner-cta {
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--violet);
+  color: #fff;
+  font: var(--label-sm);
+  font-size: 12px;
+  padding: 9px 14px;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.det-banner-cta:hover {
+  background: var(--violet-strong);
+}
+
+.det-banner-cta:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.det-banner-close {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-4);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.det-banner-close:hover {
+  background: var(--surface-sunken);
+  color: var(--ink-2);
+}
+
 /* Home: historial de reuniones pasadas (quick win #2). */
 .home-meetings {
   margin-top: 32px;
@@ -457,11 +545,21 @@ body {
   margin-bottom: 22px;
 }
 
+.detail-header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
 .detail-title {
   font: var(--display-md);
   font-size: 28px;
   color: var(--text-heading);
-  margin: 0 0 10px;
+  margin: 0;
+  flex: 1;
+  min-width: 0;
 }
 
 .detail-meta {
@@ -513,13 +611,15 @@ body {
 .detail-summary {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 20px 22px;
-  margin-bottom: 28px;
+  border-radius: var(--radius-xl);
+  padding: 26px 28px;
+  margin-bottom: 30px;
 }
 
 .detail-summary-text {
   font: var(--text-md);
+  font-size: 16px;
+  line-height: 1.7;
   color: var(--text-body);
   white-space: pre-wrap;
   margin: 0;

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Notification } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { IPC } from '@shared/ipc'
 import { createMainWindow } from './windows/main-window'
 import {
@@ -7,6 +7,7 @@ import {
   syncNubWithMainWindow,
   type NubBehavior,
 } from './windows/overlay-window'
+import { createDetectionBanner } from './windows/banner-window'
 import { registerIpc } from './ipc/register'
 import { MicMonitorService } from './services/mic-monitor.service'
 import { SettingsStore } from './services/settings.store'
@@ -43,6 +44,29 @@ if (!app.requestSingleInstanceLock()) {
     // Overlay nub: existe solo mientras hay sesión activa.
     let overlay: BrowserWindow | null = null
     let nub: NubBehavior | null = null
+    // Banner "Meeting detected": existe desde la detección hasta que el
+    // usuario decide (o 15 s). Instancia única.
+    let banner: BrowserWindow | null = null
+    let bannerTimer: NodeJS.Timeout | null = null
+
+    const closeBanner = (): void => {
+      if (bannerTimer) clearTimeout(bannerTimer)
+      bannerTimer = null
+      if (banner && !banner.isDestroyed()) banner.close()
+      banner = null
+    }
+
+    const showBanner = (label: string): void => {
+      if (banner) return // ya hay uno en pantalla
+      banner = createDetectionBanner(label)
+      banner.on('closed', () => {
+        banner = null
+        if (bannerTimer) clearTimeout(bannerTimer)
+        bannerTimer = null
+      })
+      // Auto-dismiss: si el usuario lo ignora, no estorbar.
+      bannerTimer = setTimeout(closeBanner, 15_000)
+    }
 
     // Crea la ventana principal y la sincroniza con el nub: foco en ella
     // oculta el nub siempre; perderlo (o minimizar/ocultarse) lo muestra
@@ -58,10 +82,11 @@ if (!app.requestSingleInstanceLock()) {
     }
 
     // Trae la ventana principal al frente, sin confundirla con el overlay
-    // (que también es una BrowserWindow pero no-focusable). La usan tanto
-    // el click en la notificación de reunión detectada como el nub.
+    // ni el banner (BrowserWindows no-focusables). La usan el banner de
+    // detección y el nub.
+    const isMainWin = (w: BrowserWindow): boolean => w !== overlay && w !== banner
     const focusMainWindow = (): void => {
-      const win = BrowserWindow.getAllWindows().find((w) => w !== overlay)
+      const win = BrowserWindow.getAllWindows().find(isMainWin)
       if (win) {
         if (win.isMinimized()) win.restore()
         win.show()
@@ -86,6 +111,7 @@ if (!app.requestSingleInstanceLock()) {
       onCaption: (segment) => broadcast(IPC.evCaption, segment),
       onSession: (session) => {
         broadcast(IPC.evSession, session)
+        if (session) closeBanner() // ya está grabando: el banner sobra
         if (session && !overlay) {
           // Nace visible solo si la principal ya no tiene el foco (p.ej.
           // se arrancó la captura y de inmediato se cambió a otra app).
@@ -108,35 +134,25 @@ if (!app.requestSingleInstanceLock()) {
       // Recordar la plataforma detectada aunque ya estemos grabando: fija la
       // app real (Zoom/Teams/Meet) para la próxima sesión.
       if (platform) meetings.setPlatformHint(platform)
-      if (meetings.state()) return
+      // Suprimir solo si hay captura VIVA: una sesión colgada en 'error'
+      // no debe tragarse la detección en silencio.
+      const state = meetings.state()
+      if (state && state.status !== 'error') return
       broadcast(IPC.evMeetingDetected, { label })
-      const notification = new Notification({
-        title: `Meeting detected: ${label}`,
-        body: 'Uyari can transcribe it — open the app to start.',
-      })
-      notification.on('click', focusMainWindow)
-      notification.show()
+      // Banner flotante propio (patrón Granola), NO notificación del
+      // sistema: siempre visible sobre la app de reunión, con "Start
+      // recording" a un click, inmune a Focus/No molestar.
+      showBanner(label)
     })
     monitor.start()
     app.on('before-quit', () => monitor.stop())
 
     spawnMainWindow()
 
-    app.on('second-instance', () => {
-      // La app puede seguir viva sin ventanas (macOS): si relanzan y no
-      // hay ventana principal (el nub no cuenta), crearla en vez de
-      // intentar enfocar la nada.
-      const win = BrowserWindow.getAllWindows().find((w) => w !== overlay)
-      if (win) {
-        if (win.isMinimized()) win.restore()
-        win.focus()
-      } else {
-        spawnMainWindow()
-      }
-    })
+    app.on('second-instance', focusMainWindow)
 
     app.on('activate', () => {
-      if (!BrowserWindow.getAllWindows().some((w) => w !== overlay)) spawnMainWindow()
+      if (!BrowserWindow.getAllWindows().some(isMainWin)) spawnMainWindow()
     })
 
     app.on('before-quit', () => void meetings.stop())

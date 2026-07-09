@@ -326,53 +326,114 @@ log("canal sistema: capturando a \(Int(systemRate)) Hz → 16 kHz")
 
 // ============================================================
 // CANAL 0: micrófono con voice processing (AEC del sistema)
+//
+// BUG CONOCIDO de macOS: cuando otra app de voz (Zoom) tiene su propia
+// sesión de voice processing viva y la nuestra se rearma rápido (parar y
+// volver a grabar durante la MISMA llamada), el sistema puede entregar
+// SILENCIO ABSOLUTO (ceros exactos) del mic. Un mic real siempre tiene
+// piso de ruido > 0 — ceros sostenidos = sesión VP muerta. Watchdog:
+// 4 s de ceros → reinicia el motor de voz; si sigue mudo, última carta
+// SIN voice processing (se pierde la AEC pero hay audio).
 // ============================================================
 
-let audioEngine = AVAudioEngine()
-let inputNode = audioEngine.inputNode
-do {
-    // La pieza clave anti-duplicados: la AEC de Apple resta del mic lo que
-    // el Mac está reproduciendo (la voz de los demás en la reunión).
-    try inputNode.setVoiceProcessingEnabled(true)
-    log("voice processing (AEC del sistema) activado en el mic")
-} catch {
-    log("AVISO: no pude activar voice processing (\(error)) — el mic puede colar el audio de los parlantes")
-}
-if #available(macOS 14.0, *) {
-    // Sin ducking: que el sistema no baje el volumen de la reunión.
-    inputNode.voiceProcessingOtherAudioDuckingConfiguration =
-        AVAudioVoiceProcessingOtherAudioDuckingConfiguration(
-            enableAdvancedDucking: false,
-            duckingLevel: .min
-        )
-}
+var micEngine: AVAudioEngine?
+var micPeak: Float = 0 // pico de la ventana actual del watchdog
 
-let micFormat = inputNode.outputFormat(forBus: 0)
-let micDownsampler = Downsampler(sourceRate: micFormat.sampleRate)
-inputNode.installTap(onBus: 0, bufferSize: 2400, format: micFormat) { buffer, _ in
-    guard let channelData = buffer.floatChannelData else { return }
-    let frames = Int(buffer.frameLength)
-    let mono = Array(UnsafeBufferPointer(start: channelData[0], count: frames))
-    let pcm = micDownsampler.process(mono)
-    if !pcm.isEmpty {
-        if firstMicFrame {
-            firstMicFrame = false
-            log("canal mic: primer frame emitido")
+@discardableResult
+func startMic(useVoiceProcessing: Bool) -> Bool {
+    if let old = micEngine {
+        old.inputNode.removeTap(onBus: 0)
+        try? old.inputNode.setVoiceProcessingEnabled(false)
+        old.stop()
+        micEngine = nil
+    }
+    let engine = AVAudioEngine()
+    let input = engine.inputNode
+    if useVoiceProcessing {
+        do {
+            // La pieza clave anti-duplicados: la AEC de Apple resta del mic
+            // lo que el Mac está reproduciendo (la voz de los demás).
+            try input.setVoiceProcessingEnabled(true)
+            log("voice processing (AEC del sistema) activado en el mic")
+        } catch {
+            log("AVISO: no pude activar voice processing (\(error)) — el mic puede colar el audio de los parlantes")
         }
-        writer.append(channel: CHANNEL_MIC, samples: pcm)
+        if #available(macOS 14.0, *) {
+            // Sin ducking: que el sistema no baje el volumen de la reunión.
+            input.voiceProcessingOtherAudioDuckingConfiguration =
+                AVAudioVoiceProcessingOtherAudioDuckingConfiguration(
+                    enableAdvancedDucking: false,
+                    duckingLevel: .min
+                )
+        }
+    } else {
+        log("mic SIN voice processing (AEC off) — modo de rescate")
+    }
+
+    let format = input.outputFormat(forBus: 0)
+    let downsampler = Downsampler(sourceRate: format.sampleRate)
+    input.installTap(onBus: 0, bufferSize: 2400, format: format) { buffer, _ in
+        guard let channelData = buffer.floatChannelData else { return }
+        let frames = Int(buffer.frameLength)
+        let mono = Array(UnsafeBufferPointer(start: channelData[0], count: frames))
+        for s in mono where abs(s) > micPeak { micPeak = abs(s) }
+        let pcm = downsampler.process(mono)
+        if !pcm.isEmpty {
+            if firstMicFrame {
+                firstMicFrame = false
+                log("canal mic: primer frame emitido")
+            }
+            writer.append(channel: CHANNEL_MIC, samples: pcm)
+        }
+    }
+    do {
+        try engine.start()
+        micEngine = engine
+        log("canal mic: capturando a \(Int(format.sampleRate)) Hz → 16 kHz\(useVoiceProcessing ? "" : " (sin AEC)")")
+        return true
+    } catch {
+        log("no pude arrancar el mic (\(error))")
+        return false
     }
 }
-do {
-    try audioEngine.start()
-    log("canal mic: capturando a \(Int(micFormat.sampleRate)) Hz → 16 kHz")
-} catch {
-    fail("no pude arrancar el mic (\(error))")
+
+if !startMic(useVoiceProcessing: true) { fail("no pude arrancar el mic") }
+
+// Watchdog anti-mic-mudo: revisa el pico de señal cada segundo.
+// Umbral 2 s, verificado empíricamente como seguro: una sesión VP sana
+// SIEMPRE tiene piso de ruido > 0 incluso en silencio ambiental (~4600 de
+// energía medida); la muerta ni siquiera entrega callbacks (cero exacto).
+// El rescate va DIRECTO a sin-AEC: reintentar con voice processing falló
+// 4/4 veces observadas (la sesión re-armada nace muerta igual) y cuesta
+// ~3.5 s extra. Peor caso: mic vivo a los ~4 s (antes ~9 s).
+Thread.detachNewThread {
+    var zeroStrikes = 0
+    var restarts = 0
+    while true {
+        Thread.sleep(forTimeInterval: 1)
+        let peak = micPeak
+        micPeak = 0
+        zeroStrikes = peak == 0 ? zeroStrikes + 1 : 0
+        guard zeroStrikes >= 2, restarts < 2 else { continue }
+        restarts += 1
+        zeroStrikes = 0
+        log("mic MUDO (2 s de ceros): rescate SIN AEC — intento \(restarts)")
+        startMic(useVoiceProcessing: false)
+    }
 }
 
 // --- Vida atada al padre: EOF en stdin = limpiar y salir ---
 
 func cleanup() {
-    audioEngine.stop()
+    // Soltar la sesión de voice processing EXPLÍCITAMENTE (removeTap +
+    // VP off) antes de parar: un teardown a medias es lo que deja mudo
+    // al siguiente proceso que la pida.
+    if let engine = micEngine {
+        engine.inputNode.removeTap(onBus: 0)
+        try? engine.inputNode.setVoiceProcessingEnabled(false)
+        engine.stop()
+        micEngine = nil
+    }
     if let proc = ioProcID {
         AudioDeviceStop(aggregateID, proc)
         AudioDeviceDestroyIOProcID(aggregateID, proc)

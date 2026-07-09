@@ -88,18 +88,26 @@ export class MicMonitorService {
   }
 
   private handleApps(apps: Set<string>): void {
+    // `active` se actualiza recién al FINAL: si se pisa dentro del loop,
+    // todo elemento después del primero deja de contar como nuevo (está en
+    // el propio set que se itera) y p.ej. Zoom se pierde en silencio cuando
+    // Chrome también usa el mic (los bundles llegan ordenados alfabético).
     for (const bundleId of apps) {
-      const isNew = !this.active.has(bundleId)
-      this.active = apps
-      if (!isNew || IGNORED.has(bundleId)) continue
+      if (this.active.has(bundleId) || IGNORED.has(bundleId)) continue
 
       const label =
         MEETING_APPS[bundleId] ??
         (BROWSERS[bundleId] ? `a meeting in ${BROWSERS[bundleId]}` : null)
-      if (!label) continue // apps de mic no-reunión (dictado, etc.): ignorar
+      if (!label) {
+        console.log(`[mic-monitor] ${bundleId} usa el mic (no es app de reunión, ignorada)`)
+        continue
+      }
 
       const last = this.lastNotified.get(bundleId) ?? 0
-      if (Date.now() - last < RENOTIFY_COOLDOWN_MS) continue
+      if (Date.now() - last < RENOTIFY_COOLDOWN_MS) {
+        console.log(`[mic-monitor] ${bundleId} en cooldown de notificación`)
+        continue
+      }
       this.lastNotified.set(bundleId, Date.now())
       console.log(`[mic-monitor] ${bundleId} empezó a usar el micrófono → ${label}`)
       this.onMeetingApp({ label, platform: platformFor(bundleId) })

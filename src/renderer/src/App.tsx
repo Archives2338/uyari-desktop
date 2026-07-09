@@ -7,6 +7,7 @@ import { loadFlow } from '@renderer/onboarding/state'
 import { Home } from '@renderer/screens/Home'
 import { MeetingDetail } from '@renderer/screens/MeetingDetail'
 import { OverlayPill } from '@renderer/screens/OverlayPill'
+import { DetectionBanner } from '@renderer/screens/DetectionBanner'
 
 const QUERY = new URLSearchParams(window.location.search)
 const IS_OVERLAY = QUERY.get('view') === 'overlay'
@@ -23,6 +24,13 @@ export function App(): React.JSX.Element {
     return (
       <ThemeRoot transparent>
         <OverlayPill />
+      </ThemeRoot>
+    )
+  }
+  if (QUERY.get('view') === 'banner') {
+    return (
+      <ThemeRoot transparent>
+        <DetectionBanner />
       </ThemeRoot>
     )
   }

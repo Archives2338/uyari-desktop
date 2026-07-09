@@ -112,6 +112,12 @@ export const S = {
     demoSub: 'Try a demo meeting (2 mins)',
     home: 'Go to Home',
   },
+  banner: {
+    title: 'Meeting detected',
+    start: 'Start recording',
+    starting: 'Starting…',
+    dismiss: 'Dismiss',
+  },
   home: {
     comingUp: 'Coming up',
     invite: 'Invite',

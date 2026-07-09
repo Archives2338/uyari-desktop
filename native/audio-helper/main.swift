@@ -223,6 +223,59 @@ final class Downsampler {
 }
 
 // ============================================================
+// AEC3 (Fase B del plan AUHAL/AEC3): el APM de WebRTC cancela del mic lo
+// que suena por los parlantes, usando el tap de sistema como referencia.
+// Solo existe en modo UYARI_MIC=auhal (el modo vp usa la AEC de Apple).
+// ============================================================
+
+// Modo de captura del mic: "auhal" (crudo + AEC3 propio) | "vp" (default,
+// AVAudioEngine + voice processing de Apple).
+let micMode = ProcessInfo.processInfo.environment["UYARI_MIC"] ?? "vp"
+
+// El APM procesa frames de 10 ms exactos (160 samples a 16 kHz). Este
+// acumulador convierte el goteo de tamaño variable del Downsampler en
+// frames completos para el APM.
+final class FrameChunker {
+    private var buf: [Int16] = []
+    private let frame: Int
+
+    init(frame: Int) {
+        self.frame = frame
+    }
+
+    /// Acumula `input`; por cada frame COMPLETO llama `process` (in-place) y
+    /// devuelve todo lo procesado. El residuo queda para la próxima llamada.
+    func drain(_ input: [Int16], process: (inout [Int16]) -> Void) -> [Int16] {
+        buf.append(contentsOf: input)
+        let frames = buf.count / frame
+        guard frames > 0 else { return [] }
+        var out = [Int16]()
+        out.reserveCapacity(frames * frame)
+        for i in 0..<frames {
+            var chunk = Array(buf[(i * frame)..<((i + 1) * frame)])
+            process(&chunk)
+            out.append(contentsOf: chunk)
+        }
+        buf = Array(buf[(frames * frame)...])
+        return out
+    }
+}
+
+let APM_FRAME = Int(TARGET_RATE) / 100 // 10 ms a 16 kHz = 160 samples
+var apmHandle: OpaquePointer? = nil
+let micChunker = FrameChunker(frame: APM_FRAME)
+let renderChunker = FrameChunker(frame: APM_FRAME)
+
+if micMode == "auhal" {
+    apmHandle = apm_create(Int32(TARGET_RATE))
+    if apmHandle == nil {
+        log("AEC3: apm_create falló — el mic irá CRUDO, sin cancelación de eco")
+    } else {
+        log("AEC3: APM creado (frames de \(APM_FRAME) samples)")
+    }
+}
+
+// ============================================================
 // CANAL 1: audio del sistema (Core Audio process tap)
 // ============================================================
 
@@ -320,6 +373,14 @@ let ioStatus = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, nil) {
             firstSystemFrame = false
             log("canal sistema: primer frame emitido")
         }
+        // Far-end del AEC3: lo que suena por los parlantes es la referencia
+        // que se resta del mic. Se alimenta ANTES de emitir; el canal "Them"
+        // del STT recibe el audio tal cual (el AEC solo toca el mic).
+        if let apm = apmHandle {
+            _ = renderChunker.drain(pcm) { frame in
+                frame.withUnsafeMutableBufferPointer { _ = apm_process_render(apm, $0.baseAddress) }
+            }
+        }
         writer.append(channel: CHANNEL_SYSTEM, samples: pcm)
     }
 }
@@ -408,12 +469,10 @@ func startMic(useVoiceProcessing: Bool) -> Bool {
 // CANAL 0 (modo alternativo, Fase A del plan AUHAL/AEC3): micrófono CRUDO
 // vía AUHAL — sin voice processing de Apple. Elimina de raíz el bug de
 // arbitraje VP (mic mudo) y el warm-up de ~1s del arranque en frío.
-// SIN cancelación de eco todavía (Fase B integra AEC3 con el tap como
-// referencia): con parlantes, la voz de los demás se cuela al canal mic —
-// por eso este modo vive detrás del flag UYARI_MIC=auhal (default: vp).
+// La cancelación de eco la hace el AEC3 de WebRTC (ver sección AEC3 arriba)
+// con el tap de sistema como referencia — no la caja negra de Apple. Vive
+// detrás del flag UYARI_MIC=auhal (default: vp) hasta pasar la QA de eco.
 // ============================================================
-
-let micMode = ProcessInfo.processInfo.environment["UYARI_MIC"] ?? "vp"
 
 var auhalUnit: AudioComponentInstance?
 var auhalDownsampler: Downsampler?
@@ -442,11 +501,24 @@ let auhalInputProc: AURenderCallback = { _, ioActionFlags, inTimeStamp, inBusNum
     let mono = Array(UnsafeBufferPointer(start: auhalRenderMem, count: frames))
     for s in mono where abs(s) > micPeak { micPeak = abs(s) }
     if let pcm = auhalDownsampler?.process(mono), !pcm.isEmpty {
-        if firstMicFrame {
-            firstMicFrame = false
-            log("canal mic: primer frame emitido")
+        // Near-end del AEC3: cancela in-place el eco de los parlantes usando
+        // el far-end que alimenta el IOProc del sistema. Sin APM (creación
+        // fallida) el mic va crudo — degradación visible en el log, no muda.
+        let emitted: [Int16]
+        if let apm = apmHandle {
+            emitted = micChunker.drain(pcm) { frame in
+                frame.withUnsafeMutableBufferPointer { _ = apm_process_capture(apm, $0.baseAddress) }
+            }
+        } else {
+            emitted = pcm
         }
-        writer.append(channel: CHANNEL_MIC, samples: pcm)
+        if !emitted.isEmpty {
+            if firstMicFrame {
+                firstMicFrame = false
+                log("canal mic: primer frame emitido")
+            }
+            writer.append(channel: CHANNEL_MIC, samples: emitted)
+        }
     }
     return noErr
 }
@@ -579,7 +651,7 @@ func startMicAuhal() -> Bool {
         }
     }
     log("AUHAL: IO corriendo")
-    log("canal mic: capturando CRUDO vía AUHAL a \(Int(rate)) Hz → 16 kHz (sin AEC — Fase A)")
+    log("canal mic: capturando vía AUHAL a \(Int(rate)) Hz → 16 kHz\(apmHandle != nil ? " + AEC3" : " (CRUDO, sin AEC)")")
     return true
 }
 
@@ -600,9 +672,74 @@ if micMode == "auhal" {
     }
 }
 
+// --- Bypass del AEC con auriculares (patrón Granola) ---
+// Sin eco físico (el audio va directo al oído, no rebota al mic) el AEC solo
+// puede degradar la voz. Detección: transport type del output default;
+// para BuiltIn se distingue parlante interno de jack por el data source
+// ('ispk' vs 'hdpn'). Se re-chequea cada segundo desde el watchdog (enchufar
+// auriculares al jack NO cambia el default device, solo el data source — un
+// listener de default device no lo vería).
+// UYARI_AEC=off fuerza el bypass (debug / A-B testing).
+
+func outputLikelyHeadphones() -> Bool {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var deviceID = AudioObjectID(kAudioObjectUnknown)
+    var size = UInt32(MemoryLayout<AudioObjectID>.size)
+    guard AudioObjectGetPropertyData(
+        AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID
+    ) == noErr, deviceID != kAudioObjectUnknown else { return false }
+
+    var transportAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyTransportType,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var transport: UInt32 = 0
+    size = UInt32(MemoryLayout<UInt32>.size)
+    AudioObjectGetPropertyData(deviceID, &transportAddress, 0, nil, &size, &transport)
+
+    switch transport {
+    case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE:
+        return true // AirPods / headset BT (un parlante BT también cae aquí — aceptado)
+    case kAudioDeviceTransportTypeBuiltIn:
+        // Parlante interno y jack de auriculares son el MISMO device BuiltIn;
+        // el data source dice cuál está activo: 'hdpn' = headphones.
+        var sourceAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDataSource,
+            mScope: kAudioObjectPropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var source: UInt32 = 0
+        size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(deviceID, &sourceAddress, 0, nil, &size, &source) == noErr
+        else { return false }
+        return source == 0x6864_706E // 'hdpn'
+    default:
+        // HDMI/DisplayPort/USB/AirPlay: casi siempre parlantes → AEC activo.
+        return false
+    }
+}
+
+var aecBypassed: Bool? = nil // nil = aún no evaluado (fuerza el primer log)
+
+func updateAecBypass() {
+    guard let apm = apmHandle else { return }
+    let forcedOff = ProcessInfo.processInfo.environment["UYARI_AEC"] == "off"
+    let bypass = forcedOff || outputLikelyHeadphones()
+    guard bypass != aecBypassed else { return }
+    aecBypassed = bypass
+    apm_set_bypass(apm, bypass ? 1 : 0)
+    log("AEC3: \(bypass ? "BYPASS (\(forcedOff ? "forzado por UYARI_AEC=off" : "auriculares"))" : "ACTIVO (parlantes)")")
+}
+
 // --- Arranque del canal mic según el modo ---
 if micMode == "auhal" {
     if !startMicAuhal() { fail("no pude arrancar el mic (AUHAL)") }
+    updateAecBypass()
 } else {
     if !startMic(useVoiceProcessing: true) { fail("no pude arrancar el mic") }
 }
@@ -619,6 +756,9 @@ Thread.detachNewThread {
     var restarts = 0
     while true {
         Thread.sleep(forTimeInterval: 1)
+        // Re-chequear auriculares vs parlantes (enchufar al jack no cambia el
+        // default device, así que se sondea; la lectura es barata).
+        updateAecBypass()
         // En pausa el mic está detenido a propósito: cero señal es lo esperado,
         // no un mic mudo. No contar strikes ni intentar rescate.
         if paused {
@@ -704,6 +844,11 @@ func cleanup() {
     }
     AudioHardwareDestroyAggregateDevice(aggregateID)
     AudioHardwareDestroyProcessTap(tapID)
+    // Con las unidades paradas ya no hay callbacks tocando el APM.
+    if let apm = apmHandle {
+        apmHandle = nil
+        apm_destroy(apm)
+    }
     log("limpieza completa, saliendo")
 }
 

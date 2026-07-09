@@ -5,6 +5,7 @@ dist/
 .DS_Store
 *.tsbuildinfo
 native/bin/
+native/build/
 # Fuente + builds de webrtc-audio-processing (~cientos de MB): se regenera
 # con native/scripts/build-webrtc-apm.sh
 native/vendor/

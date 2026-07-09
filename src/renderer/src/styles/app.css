@@ -93,7 +93,9 @@ body {
   gap: 8px;
 }
 
-/* Overlay pill (ventana flotante transparente) */
+/* Overlay nub (ventana flotante transparente) — diseño OA/OD: dock vertical
+   en reposo + popover al hover, sin tabs. Todo por tokens (var(--...)) para
+   ser dinámico en light/dark sin código de tema aquí (ver theme.tsx). */
 .overlay-mode,
 .overlay-mode body,
 .overlay-mode #root {
@@ -101,83 +103,83 @@ body {
   overflow: hidden;
 }
 
-.overlay-pill {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  height: 44px;
-  width: 240px;
+.nub {
+  position: relative;
+  height: 100%;
+  width: 100%;
+}
+
+/* Dock: única superficie visible en reposo. Su geometría (right/width/
+   height/margen) debe coincidir con DOCK_* en overlay-window.ts — es lo
+   que el main usa para calcular el hover por posición del cursor. */
+.nub-dock {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 56px;
+  height: 76px;
   box-sizing: border-box;
-  flex-shrink: 0;
-  margin: 4px 4px 6px auto; /* chip anclado arriba a la derecha */
-  padding: 0 8px 0 14px;
   background: var(--surface);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-float);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   cursor: grab; /* drag manual: mousedown → el main sigue el cursor */
   user-select: none;
 }
 
-.overlay-pill:active {
+.nub-dock:active {
   cursor: grabbing;
 }
 
-.pill-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: #e5484d;
-  animation: pulse 1.4s infinite;
-  flex-shrink: 0;
+.nub-dock-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  pointer-events: none;
 }
 
-.pill-dot-amber {
+.nub-dock-dots {
+  display: flex;
+  gap: 3px;
+  pointer-events: none;
+}
+
+.nub-dock-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--mint);
+  animation: nub-dock-pulse 1.4s ease-in-out infinite;
+}
+
+.nub-dock-dot-amber {
   background: #f5c451;
 }
 
-.pill-time {
-  font-variant-numeric: tabular-nums;
-  font: var(--label-sm);
-  color: var(--text-heading);
+@keyframes nub-dock-pulse {
+  0%,
+  100% {
+    transform: scale(0.85);
+  }
+  50% {
+    transform: scale(1);
+  }
 }
 
-.pill-label {
-  flex: 1;
-  font: var(--text-xs);
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-.pill-stop {
-  border: none;
-  border-radius: 50%;
-  width: 30px;
-  height: 30px;
-  background: var(--surface-sunken);
-  color: #e5484d;
-  font-size: 11px;
-  cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out);
-}
-
-.pill-stop:hover {
-  background: var(--violet-soft);
-}
-
-/* Nub: la ventana ya es grande y click-through; el panel se revela por CSS
-   en hover (sin resize de ventana → sin parpadeo, patrón Granola). */
-.nub {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
-.nub-panel {
-  flex: 1;
-  min-height: 0;
-  margin: 2px 4px 6px;
+/* Popover: oculto hasta el hover (opacity+visibility, NUNCA display:none
+   para que la transición se vea) — la ventana no se redimensiona. */
+.nub-popover {
+  position: absolute;
+  left: 20px;
+  right: 76px;
+  top: 20px;
+  bottom: 20px;
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
@@ -185,26 +187,91 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  /* Oculto hasta el hover: invisible y sin capturar mouse */
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transform: translateY(-6px);
+  transform: translateX(6px);
   transition:
     opacity 160ms var(--ease-out),
     transform 160ms var(--ease-out),
     visibility 0s linear 160ms;
 }
 
-.nub-panel-open {
+.nub-popover-open {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
-  transform: translateY(0);
+  transform: translateX(0);
   transition:
     opacity 160ms var(--ease-out),
     transform 160ms var(--ease-out),
     visibility 0s;
+}
+
+.nub-popover-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.nub-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--mint);
+  flex-shrink: 0;
+  animation: pulse 1.4s infinite;
+}
+
+.nub-dot-amber {
+  background: #f5c451;
+}
+
+.nub-title {
+  font: var(--label-sm);
+  font-size: 13px;
+  color: var(--text-heading);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nub-time {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  font: var(--text-xs);
+  color: var(--ink-4);
+}
+
+.nub-stop {
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  background: var(--surface-sunken);
+  color: #e5484d;
+  font-size: 9px;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.nub-stop:hover {
+  background: var(--violet-soft);
+}
+
+.nub-popover-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
 }
 
 .nub-empty {
@@ -217,32 +284,94 @@ body {
 }
 
 .nub-transcript {
-  flex: 1;
-  overflow-y: auto;
-  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .nub-line {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
+  align-items: flex-start;
+  max-width: 90%;
 }
 
 .nub-speaker {
-  font: var(--label-sm);
+  margin-left: 4px;
+  font: var(--text-xs);
+  font-weight: 400;
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--ink-4);
 }
 
 .nub-speaker-you {
   color: var(--accent-strong);
 }
 
-.nub-text {
+.nub-bubble {
+  background: var(--violet-soft);
+  color: var(--text-heading);
   font: var(--text-sm);
   font-size: 13px;
-  color: var(--text-body);
+  line-height: 1.5;
+  border-radius: 12px 12px 12px 4px;
+  padding: 8px 12px;
+}
+
+/* Ask bar: reemplaza las tabs — es el cuerpo del popover (transcript) +
+   este input lo que cubre "Transcripción" y "Pregúntale a Uyari". No
+   responde inline: cualquier tap abre/enfoca la app (ver footnote). */
+.nub-ask-bar {
+  flex-shrink: 0;
+  margin: 0 14px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  padding: 4px 4px 4px 16px;
+}
+
+.nub-ask-input {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 8px 0;
+  font: var(--text-sm);
+  font-size: 13px;
+  color: var(--ink-4);
+  cursor: pointer;
+}
+
+.nub-ask-chip {
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--violet-soft);
+  color: var(--accent-strong);
+  font: var(--label-sm);
+  font-size: 11px;
+  padding: 7px 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.nub-ask-chip:hover {
+  background: var(--violet-wash);
+}
+
+.nub-footnote {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0 14px 12px;
+  font: var(--text-xs);
+  font-weight: 400;
+  font-size: 10px;
+  color: var(--ink-4);
+  text-align: center;
 }

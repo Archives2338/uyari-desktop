@@ -28,6 +28,9 @@ export const IPC = {
   netStatus: 'net:status',
   // renderer → main: mousedown/mouseup sobre la pill (drag manual del nub)
   overlayDrag: 'overlay:drag',
+  // renderer → main: el nub pide traer la ventana principal al frente
+  // (tap en "Pregúntale a Uyari" — las respuestas se abren en la app)
+  overlayFocusMain: 'overlay:focus-main',
   // main → renderer (push)
   evCaption: 'ev:caption',
   evSession: 'ev:session',
@@ -80,6 +83,8 @@ export interface UyariBridge {
      */
     dragStart(): void
     dragEnd(): void
+    /** El "Pregúntale a Uyari" del nub no responde inline: abre la app. */
+    focusMain(): void
   }
   events: {
     onCaption(cb: (segment: CaptionSegment) => void): () => void

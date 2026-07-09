@@ -40,6 +40,7 @@ const bridge: UyariBridge = {
   overlay: {
     dragStart: () => ipcRenderer.send(IPC.overlayDrag, 'start'),
     dragEnd: () => ipcRenderer.send(IPC.overlayDrag, 'end'),
+    focusMain: () => ipcRenderer.send(IPC.overlayFocusMain),
   },
   events: {
     onCaption: subscribe<CaptionSegment>(IPC.evCaption),

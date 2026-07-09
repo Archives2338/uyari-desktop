@@ -1,7 +1,12 @@
 import { app, BrowserWindow, Notification } from 'electron'
 import { IPC } from '@shared/ipc'
 import { createMainWindow } from './windows/main-window'
-import { createOverlayWindow, attachNubBehavior, type NubBehavior } from './windows/overlay-window'
+import {
+  createOverlayWindow,
+  attachNubBehavior,
+  syncNubWithMainWindow,
+  type NubBehavior,
+} from './windows/overlay-window'
 import { registerIpc } from './ipc/register'
 import { MicMonitorService } from './services/mic-monitor.service'
 import { SettingsStore } from './services/settings.store'
@@ -39,11 +44,38 @@ if (!app.requestSingleInstanceLock()) {
     let overlay: BrowserWindow | null = null
     let nub: NubBehavior | null = null
 
+    // Crea la ventana principal y la sincroniza con el nub: foco en ella
+    // oculta el nub siempre; perderlo (o minimizar/ocultarse) lo muestra
+    // solo si hay captura activa (modelo Granola — ver overlay-window.ts).
+    const spawnMainWindow = (): BrowserWindow => {
+      const win = createMainWindow()
+      syncNubWithMainWindow(
+        win,
+        () => overlay,
+        () => meetings.state() !== null,
+      )
+      return win
+    }
+
+    // Trae la ventana principal al frente, sin confundirla con el overlay
+    // (que también es una BrowserWindow pero no-focusable). La usan tanto
+    // el click en la notificación de reunión detectada como el nub.
+    const focusMainWindow = (): void => {
+      const win = BrowserWindow.getAllWindows().find((w) => w !== overlay)
+      if (win) {
+        if (win.isMinimized()) win.restore()
+        win.show()
+        win.focus()
+      } else {
+        spawnMainWindow()
+      }
+    }
+
     registerIpc({
       settings,
       api,
       meetings,
-      overlay: { drag: (action) => nub?.drag(action) },
+      overlay: { drag: (action) => nub?.drag(action), focusMain: focusMainWindow },
     })
 
     // Reuniones que quedaron a medias en una corrida anterior (crash o
@@ -55,7 +87,10 @@ if (!app.requestSingleInstanceLock()) {
       onSession: (session) => {
         broadcast(IPC.evSession, session)
         if (session && !overlay) {
-          overlay = createOverlayWindow()
+          // Nace visible solo si la principal ya no tiene el foco (p.ej.
+          // se arrancó la captura y de inmediato se cambió a otra app).
+          const mainFocused = BrowserWindow.getAllWindows().some((w) => w.isFocused())
+          overlay = createOverlayWindow(!mainFocused)
           nub = attachNubBehavior(overlay)
           overlay.on('closed', () => {
             overlay = null
@@ -79,32 +114,29 @@ if (!app.requestSingleInstanceLock()) {
         title: `Meeting detected: ${label}`,
         body: 'Uyari can transcribe it — open the app to start.',
       })
-      notification.on('click', () => {
-        const [win] = BrowserWindow.getAllWindows()
-        win?.show()
-        win?.focus()
-      })
+      notification.on('click', focusMainWindow)
       notification.show()
     })
     monitor.start()
     app.on('before-quit', () => monitor.stop())
 
-    createMainWindow()
+    spawnMainWindow()
 
     app.on('second-instance', () => {
       // La app puede seguir viva sin ventanas (macOS): si relanzan y no
-      // hay ventana, crearla en vez de intentar enfocar la nada.
-      const [win] = BrowserWindow.getAllWindows()
+      // hay ventana principal (el nub no cuenta), crearla en vez de
+      // intentar enfocar la nada.
+      const win = BrowserWindow.getAllWindows().find((w) => w !== overlay)
       if (win) {
         if (win.isMinimized()) win.restore()
         win.focus()
       } else {
-        createMainWindow()
+        spawnMainWindow()
       }
     })
 
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createMainWindow()
+      if (!BrowserWindow.getAllWindows().some((w) => w !== overlay)) spawnMainWindow()
     })
 
     app.on('before-quit', () => void meetings.stop())

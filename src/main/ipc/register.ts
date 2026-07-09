@@ -13,8 +13,8 @@ interface Services {
   settings: SettingsStore
   api: ApiClient
   meetings: MeetingService
-  /** Drag manual del nub flotante (si existe) — gestión de ventana pura. */
-  overlay: { drag(action: 'start' | 'end'): void }
+  /** Gestión de ventana del nub flotante — sin lógica de negocio. */
+  overlay: { drag(action: 'start' | 'end'): void; focusMain(): void }
 }
 
 export function registerIpc({ settings, api, meetings, overlay }: Services): void {
@@ -46,4 +46,5 @@ export function registerIpc({ settings, api, meetings, overlay }: Services): voi
   ipcMain.on(IPC.micLog, (_e, message: string) => console.log('[mic-renderer]', message))
   ipcMain.on(IPC.netStatus, (_e, online: boolean) => meetings.setNetworkOnline(online))
   ipcMain.on(IPC.overlayDrag, (_e, action: 'start' | 'end') => overlay.drag(action))
+  ipcMain.on(IPC.overlayFocusMain, () => overlay.focusMain())
 }

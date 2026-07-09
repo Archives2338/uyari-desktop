@@ -404,7 +404,208 @@ func startMic(useVoiceProcessing: Bool) -> Bool {
     }
 }
 
-if !startMic(useVoiceProcessing: true) { fail("no pude arrancar el mic") }
+// ============================================================
+// CANAL 0 (modo alternativo, Fase A del plan AUHAL/AEC3): micrófono CRUDO
+// vía AUHAL — sin voice processing de Apple. Elimina de raíz el bug de
+// arbitraje VP (mic mudo) y el warm-up de ~1s del arranque en frío.
+// SIN cancelación de eco todavía (Fase B integra AEC3 con el tap como
+// referencia): con parlantes, la voz de los demás se cuela al canal mic —
+// por eso este modo vive detrás del flag UYARI_MIC=auhal (default: vp).
+// ============================================================
+
+let micMode = ProcessInfo.processInfo.environment["UYARI_MIC"] ?? "vp"
+
+var auhalUnit: AudioComponentInstance?
+var auhalDownsampler: Downsampler?
+// Buffer preasignado para AudioUnitRender: el callback de entrada corre en
+// el hilo de tiempo real — nada de allocs ahí. 16384 frames cubre cualquier
+// buffer size de dispositivo razonable.
+let AUHAL_MAX_FRAMES = 16384
+let auhalRenderMem = UnsafeMutablePointer<Float>.allocate(capacity: AUHAL_MAX_FRAMES)
+
+// Callback C de entrada (sin capturas → convertible a puntero de función C).
+// Consume vía globals, como el resto del helper.
+let auhalInputProc: AURenderCallback = { _, ioActionFlags, inTimeStamp, inBusNumber, inNumberFrames, _ in
+    guard let unit = auhalUnit, inNumberFrames <= AUHAL_MAX_FRAMES else { return noErr }
+    var abl = AudioBufferList(
+        mNumberBuffers: 1,
+        mBuffers: AudioBuffer(
+            mNumberChannels: 1,
+            mDataByteSize: UInt32(AUHAL_MAX_FRAMES * MemoryLayout<Float>.size),
+            mData: auhalRenderMem
+        )
+    )
+    let status = AudioUnitRender(unit, ioActionFlags, inTimeStamp, inBusNumber, inNumberFrames, &abl)
+    guard status == noErr else { return status }
+
+    let frames = Int(inNumberFrames)
+    let mono = Array(UnsafeBufferPointer(start: auhalRenderMem, count: frames))
+    for s in mono where abs(s) > micPeak { micPeak = abs(s) }
+    if let pcm = auhalDownsampler?.process(mono), !pcm.isEmpty {
+        if firstMicFrame {
+            firstMicFrame = false
+            log("canal mic: primer frame emitido")
+        }
+        writer.append(channel: CHANNEL_MIC, samples: pcm)
+    }
+    return noErr
+}
+
+func defaultInputDevice() -> AudioObjectID {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDefaultInputDevice,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var deviceID = AudioObjectID(kAudioObjectUnknown)
+    var size = UInt32(MemoryLayout<AudioObjectID>.size)
+    AudioObjectGetPropertyData(
+        AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID
+    )
+    return deviceID
+}
+
+func deviceSampleRate(_ deviceID: AudioObjectID) -> Double {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyNominalSampleRate,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var rate: Float64 = 0
+    var size = UInt32(MemoryLayout<Float64>.size)
+    AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &rate)
+    return rate > 0 ? rate : 48_000
+}
+
+func stopMicAuhal() {
+    guard let unit = auhalUnit else { return }
+    auhalUnit = nil // el callback ve nil y no rinde más
+    AudioOutputUnitStop(unit)
+    AudioUnitUninitialize(unit)
+    AudioComponentInstanceDispose(unit)
+}
+
+@discardableResult
+func startMicAuhal() -> Bool {
+    stopMicAuhal()
+
+    var desc = AudioComponentDescription(
+        componentType: kAudioUnitType_Output,
+        componentSubType: kAudioUnitSubType_HALOutput,
+        componentManufacturer: kAudioUnitManufacturer_Apple,
+        componentFlags: 0,
+        componentFlagsMask: 0
+    )
+    guard let component = AudioComponentFindNext(nil, &desc) else {
+        log("AUHAL: no encontré el componente HALOutput")
+        return false
+    }
+    var unitOpt: AudioComponentInstance?
+    guard AudioComponentInstanceNew(component, &unitOpt) == noErr, let unit = unitOpt else {
+        log("AUHAL: no pude instanciar la unidad")
+        return false
+    }
+
+    // Input ON (bus 1), output OFF (bus 0) — solo capturamos.
+    var one: UInt32 = 1
+    var zero: UInt32 = 0
+    AudioUnitSetProperty(unit, kAudioOutputUnitProperty_EnableIO,
+                         kAudioUnitScope_Input, 1, &one, 4)
+    AudioUnitSetProperty(unit, kAudioOutputUnitProperty_EnableIO,
+                         kAudioUnitScope_Output, 0, &zero, 4)
+
+    var deviceID = defaultInputDevice()
+    guard deviceID != kAudioObjectUnknown else {
+        log("AUHAL: no hay dispositivo de entrada default")
+        AudioComponentInstanceDispose(unit)
+        return false
+    }
+    guard AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice,
+                               kAudioUnitScope_Global, 0, &deviceID,
+                               UInt32(MemoryLayout<AudioObjectID>.size)) == noErr else {
+        log("AUHAL: no pude asignar el dispositivo \(deviceID)")
+        AudioComponentInstanceDispose(unit)
+        return false
+    }
+
+    // Formato cliente en el output scope del bus de input (lo que RECIBIMOS):
+    // float32 mono a la rate NATIVA del dispositivo (AUHAL no resamplea en
+    // input; la conversión a 16 kHz la hace nuestro Downsampler).
+    let rate = deviceSampleRate(deviceID)
+    var fmt = AudioStreamBasicDescription(
+        mSampleRate: rate,
+        mFormatID: kAudioFormatLinearPCM,
+        mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked
+            | kAudioFormatFlagIsNonInterleaved,
+        mBytesPerPacket: 4,
+        mFramesPerPacket: 1,
+        mBytesPerFrame: 4,
+        mChannelsPerFrame: 1,
+        mBitsPerChannel: 32,
+        mReserved: 0
+    )
+    guard AudioUnitSetProperty(unit, kAudioUnitProperty_StreamFormat,
+                               kAudioUnitScope_Output, 1, &fmt,
+                               UInt32(MemoryLayout<AudioStreamBasicDescription>.size)) == noErr
+    else {
+        log("AUHAL: el dispositivo rechazó float32 mono @ \(Int(rate)) Hz")
+        AudioComponentInstanceDispose(unit)
+        return false
+    }
+
+    var callback = AURenderCallbackStruct(inputProc: auhalInputProc, inputProcRefCon: nil)
+    AudioUnitSetProperty(unit, kAudioOutputUnitProperty_SetInputCallback,
+                         kAudioUnitScope_Global, 0, &callback,
+                         UInt32(MemoryLayout<AURenderCallbackStruct>.size))
+
+    log("AUHAL: configurado, inicializando…")
+    guard AudioUnitInitialize(unit) == noErr else {
+        log("AUHAL: AudioUnitInitialize falló")
+        AudioComponentInstanceDispose(unit)
+        return false
+    }
+    log("AUHAL: inicializado, arrancando IO…")
+
+    auhalDownsampler = Downsampler(sourceRate: rate)
+    auhalUnit = unit
+
+    // En pausa: dejar la unidad armada pero sin IO (el indicador del mic se
+    // apaga — bonus de privacidad que el modo VP no puede dar).
+    if !paused {
+        guard AudioOutputUnitStart(unit) == noErr else {
+            log("AUHAL: AudioOutputUnitStart falló")
+            stopMicAuhal()
+            return false
+        }
+    }
+    log("AUHAL: IO corriendo")
+    log("canal mic: capturando CRUDO vía AUHAL a \(Int(rate)) Hz → 16 kHz (sin AEC — Fase A)")
+    return true
+}
+
+// Cambio del input default en vivo (enchufar AirPods a mitad de reunión):
+// AVAudioEngine seguía al dispositivo solo; con AUHAL es responsabilidad
+// nuestra. Re-armar sobre el dispositivo nuevo.
+var inputDeviceAddress = AudioObjectPropertyAddress(
+    mSelector: kAudioHardwarePropertyDefaultInputDevice,
+    mScope: kAudioObjectPropertyScopeGlobal,
+    mElement: kAudioObjectPropertyElementMain
+)
+if micMode == "auhal" {
+    AudioObjectAddPropertyListenerBlock(
+        AudioObjectID(kAudioObjectSystemObject), &inputDeviceAddress, DispatchQueue.global()
+    ) { _, _ in
+        log("dispositivo de entrada default cambió: re-armando AUHAL")
+        startMicAuhal()
+    }
+}
+
+// --- Arranque del canal mic según el modo ---
+if micMode == "auhal" {
+    if !startMicAuhal() { fail("no pude arrancar el mic (AUHAL)") }
+} else {
+    if !startMic(useVoiceProcessing: true) { fail("no pude arrancar el mic") }
+}
 
 // Watchdog anti-mic-mudo: revisa el pico de señal cada segundo.
 // Umbral 2 s, verificado empíricamente como seguro: una sesión VP sana
@@ -431,8 +632,16 @@ Thread.detachNewThread {
         guard zeroStrikes >= 2, restarts < 2 else { continue }
         restarts += 1
         zeroStrikes = 0
-        log("mic MUDO (2 s de ceros): rescate SIN AEC — intento \(restarts)")
-        startMic(useVoiceProcessing: false)
+        if micMode == "auhal" {
+            // El mic crudo no sufre el arbitraje VP; ceros sostenidos aquí =
+            // dispositivo caído/cambiado (el listener de default input ya
+            // re-arma). Reintentar una vez y loguear, sin cambiar de modo.
+            log("mic en silencio absoluto (AUHAL): re-armando — intento \(restarts)")
+            startMicAuhal()
+        } else {
+            log("mic MUDO (2 s de ceros): rescate SIN AEC — intento \(restarts)")
+            startMic(useVoiceProcessing: false)
+        }
     }
 }
 
@@ -444,20 +653,34 @@ Thread.detachNewThread {
 func pauseCapture() {
     guard !paused else { return }
     paused = true
-    micEngine?.pause()
+    if micMode == "auhal" {
+        // Con AUHAL la pausa PARA el IO de verdad: el indicador naranja del
+        // mic se apaga (bonus de privacidad); reanudar sigue siendo barato
+        // porque la unidad queda armada.
+        if let unit = auhalUnit { AudioOutputUnitStop(unit) }
+    } else {
+        micEngine?.pause()
+    }
     if let proc = ioProcID { AudioDeviceStop(aggregateID, proc) }
-    log("captura pausada (VP sigue armado — resume instantáneo)")
+    log("captura pausada (\(micMode == "auhal" ? "AUHAL detenido, unidad armada" : "VP sigue armado") — resume instantáneo)")
 }
 
 func resumeCapture() {
     guard paused else { return }
     paused = false
     if let proc = ioProcID { AudioDeviceStart(aggregateID, proc) }
-    do {
-        try micEngine?.start()
-    } catch {
-        log("no pude reanudar el mic (\(error)) — rescate SIN AEC")
-        startMic(useVoiceProcessing: false)
+    if micMode == "auhal" {
+        if let unit = auhalUnit, AudioOutputUnitStart(unit) != noErr {
+            log("no pude reanudar el mic (AUHAL) — re-armando")
+            startMicAuhal()
+        }
+    } else {
+        do {
+            try micEngine?.start()
+        } catch {
+            log("no pude reanudar el mic (\(error)) — rescate SIN AEC")
+            startMic(useVoiceProcessing: false)
+        }
     }
     log("captura reanudada")
 }
@@ -474,6 +697,7 @@ func cleanup() {
         engine.stop()
         micEngine = nil
     }
+    stopMicAuhal()
     if let proc = ioProcID {
         AudioDeviceStop(aggregateID, proc)
         AudioDeviceDestroyIOProcID(aggregateID, proc)

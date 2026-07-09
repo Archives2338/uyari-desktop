@@ -16,16 +16,17 @@ export interface CaptureDeps {
 }
 
 // Selección del motor por env var:
-//   (default)            → mic: micrófono → AssemblyAI streaming (fase 2b)
+//   (default)            → native: mic ("You") + audio del sistema ("Them")
+//                          vía helper Swift (fase 2c, patrón Granola)
+//   UYARI_CAPTURE=mic    → solo micrófono (fase 2b)
 //   UYARI_CAPTURE=mock   → conversación falsa (desarrollar UI sin API key)
-//   UYARI_CAPTURE=native → mic + audio del sistema vía helper Swift (fase 2c)
 export function createCaptureEngine(deps: CaptureDeps): CaptureEngine {
   switch (process.env.UYARI_CAPTURE) {
     case 'mock':
       return new MockCaptureEngine()
-    case 'native':
-      return new NativeCaptureEngine()
-    default:
+    case 'mic':
       return new AssemblyAiMicEngine(deps.api, deps.mic)
+    default:
+      return new NativeCaptureEngine(deps.api, deps.mic)
   }
 }

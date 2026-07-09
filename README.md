@@ -83,17 +83,33 @@ renderer (getUserMedia + AudioWorklet, PCM16 16 kHz, chunks de 50 ms)
                  el dedupe del buffer lo pisa → captions que se corrigen en vivo)
 ```
 
-## Fase 2c: audio del sistema (reemplazar native.engine)
+## Fase 2c (HECHO): audio del sistema — dos canales con separación de hablantes
 
-Patrón validado en el research de Granola (`../os/granola-desktop.md`):
+Patrón Granola implementado (`../os/granola-desktop.md`):
 
-1. **Helper Swift** empaquetado en `Resources/`, lanzado como child process:
-   system audio vía Core Audio process tap + aggregate device (macOS 14.4+,
-   excluyéndose a sí mismo), micrófono vía AVAudioEngine, PCM por stdout.
-2. Se enchufa al MISMO stream STT de 2b como segundo canal (mic = "You",
-   sistema = los demás participantes).
-3. Se implementa todo dentro de `NativeCaptureEngine`; nada más cambia.
-   Activar con `UYARI_CAPTURE=native`.
+```
+renderer (mic, getUserMedia)  ──IPC──▶ AssemblyAiStream "you"  ─▶ segmentos speaker="You"
+helper Swift (system audio)   ─stdout─▶ AssemblyAiStream "them" ─▶ segmentos speaker="Them"
+  (Core Audio process tap + aggregate device, macOS 14.4+,
+   se excluye a sí mismo; PCM16LE mono 16 kHz, frames de 50 ms)
+```
+
+- Helper: `native/audio-helper/main.swift` → compilar con `npm run build:helper`
+  (binario en `native/bin/`, empaquetado como extraResource en prod).
+- Cada canal tiene SU PROPIA sesión STT con toda la resiliencia de
+  `AssemblyAiStream` (backlog, reconexión, rotación 3 h, recorte de
+  silencio). Costo: 2 × $0.15/h.
+- Degradación elegante: si el helper no arranca (típicamente falta el
+  permiso TCC "System Audio Recording" en Privacy & Security → Screen &
+  System Audio Recording), la sesión sigue mic-only con aviso en la UI.
+- Permiso TCC: exige `NSAudioCaptureUsageDescription` en el Info.plist del
+  app. En dev se inyecta al Electron de node_modules vía `postinstall`;
+  en prod va en `electron-builder.yml` (extendInfo).
+- Motores: default = nativo (2 canales); `UYARI_CAPTURE=mic` = solo mic;
+  `UYARI_CAPTURE=mock` = conversación falsa.
+
+Pendiente del paquete 2c: auto-detección de reunión (monitorear qué app usa
+el mic, estilo Granola) y overlay pill flotante.
 
 Alternativa si se quiere acortar la fase 2: Recall.ai Desktop SDK
 ($0.50/h + STT) en otro engine más, misma interfaz.

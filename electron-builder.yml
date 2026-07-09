@@ -7,6 +7,11 @@ directories:
 files:
   - out/**
   - package.json
+extraResources:
+  # Helper Swift de captura de audio del sistema (Core Audio process tap).
+  # Compilar antes con: npm run build:helper
+  - from: native/bin/uyari-audio-helper
+    to: uyari-audio-helper
 mac:
   category: public.app-category.productivity
   icon: resources/icon.png
@@ -14,3 +19,4 @@ mac:
     - dmg
   extendInfo:
     NSMicrophoneUsageDescription: Uyari uses the microphone to capture your side of the meeting.
+    NSAudioCaptureUsageDescription: Uyari captures meeting audio to transcribe it.

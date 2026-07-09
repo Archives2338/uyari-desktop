@@ -54,6 +54,12 @@ export function createOverlayWindow(initiallyVisible: boolean): BrowserWindow {
     skipTaskbar: true,
     focusable: false,
     show: false,
+    // NSPanel NO-activador: clickear los botones del nub (pausa/resume/stop)
+    // recibe el click SIN activar la app — antes traía la ventana principal
+    // al frente en cada click. "Pregúntale a Uyari" sí abre la app, pero con
+    // su focusMain explícito. hiddenInMissionControl: no ensucia el expose.
+    type: 'panel',
+    hiddenInMissionControl: true,
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.mjs'),
       contextIsolation: true,
@@ -61,8 +67,11 @@ export function createOverlayWindow(initiallyVisible: boolean): BrowserWindow {
     },
   })
 
-  win.setAlwaysOnTop(true, 'floating')
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  win.setAlwaysOnTop(true, 'screen-saver')
+  win.setVisibleOnAllWorkspaces(true, {
+    visibleOnFullScreen: true,
+    skipTransformProcessType: true,
+  })
   win.setIgnoreMouseEvents(true, { forward: true })
 
   if (process.env.ELECTRON_RENDERER_URL) {

@@ -48,8 +48,16 @@ if (!app.requestSingleInstanceLock()) {
     // usuario decide (o 15 s). Instancia única.
     let banner: BrowserWindow | null = null
     let bannerTimer: NodeJS.Timeout | null = null
+    // Delay antes de mostrar el banner tras detectar la reunión (como Granola,
+    // flag mic_apps_notification_delay_seconds=2): deja que Zoom/Meet terminen
+    // de abrirse y reclamar el z-order, así el banner aparece limpio ENCIMA en
+    // vez de detrás o parpadeando.
+    const BANNER_DELAY_MS = 2000
+    let bannerPending: NodeJS.Timeout | null = null
 
     const closeBanner = (): void => {
+      if (bannerPending) clearTimeout(bannerPending)
+      bannerPending = null
       if (bannerTimer) clearTimeout(bannerTimer)
       bannerTimer = null
       if (banner && !banner.isDestroyed()) banner.close()
@@ -129,7 +137,9 @@ if (!app.requestSingleInstanceLock()) {
     })
 
     // Auto-detección de reunión: si una app de reuniones enciende el mic y
-    // no estamos grabando, banner en la app + notificación del sistema.
+    // no estamos grabando, banner flotante propio (patrón Granola), NO
+    // notificación del sistema: siempre visible sobre la app de reunión, con
+    // "Start recording" a un click, inmune a Focus/No molestar.
     const monitor = new MicMonitorService(({ label, platform }) => {
       // Recordar la plataforma detectada aunque ya estemos grabando: fija la
       // app real (Zoom/Teams/Meet) para la próxima sesión.
@@ -138,11 +148,17 @@ if (!app.requestSingleInstanceLock()) {
       // no debe tragarse la detección en silencio.
       const state = meetings.state()
       if (state && state.status !== 'error') return
-      broadcast(IPC.evMeetingDetected, { label })
-      // Banner flotante propio (patrón Granola), NO notificación del
-      // sistema: siempre visible sobre la app de reunión, con "Start
-      // recording" a un click, inmune a Focus/No molestar.
-      showBanner(label)
+      broadcast(IPC.evMeetingDetected, { label }) // pista in-app inmediata
+      // Banner flotante con delay: no encimarlo mientras Zoom se abre (ver
+      // BANNER_DELAY_MS). Un solo pendiente a la vez.
+      if (bannerPending || banner) return
+      bannerPending = setTimeout(() => {
+        bannerPending = null
+        // Revalidar: en estos 2 s el usuario pudo arrancar la captura a mano.
+        const s = meetings.state()
+        if (s && s.status !== 'error') return
+        showBanner(label)
+      }, BANNER_DELAY_MS)
     })
     monitor.start()
     app.on('before-quit', () => monitor.stop())

@@ -4,10 +4,10 @@ import appIcon from '@renderer/assets/uyari-app-icon-macos.svg'
 
 // Contenido de la ventana banner de reunión detectada (creada por el main
 // cuando el mic-monitor ve una app de reunión encender el micrófono).
-// Un click en "Start recording" arranca la captura Y abre la app (mismo
-// flujo que Granola: detectar → un click → grabando con la nota abierta).
-// El auto-dismiss (15 s) y el cierre al arrancar la captura los maneja el
-// main; aquí solo la X y los botones.
+// Un click en "Start recording" arranca la captura y muestra SOLO el nub
+// flotante — NO abre la app ni roba foco (te deja en tu reunión, como
+// Granola). El auto-dismiss (15 s) y el cierre al arrancar la captura los
+// maneja el main; aquí solo la X y los botones.
 
 export function DetectionBanner(): React.JSX.Element {
   const label = new URLSearchParams(window.location.search).get('label') ?? 'A meeting app'
@@ -22,9 +22,8 @@ export function DetectionBanner(): React.JSX.Element {
     setStarting(true)
     try {
       await window.uyari.capture.start(`${label} meeting`)
-      // Abrir la app con el transcript en vivo (equivalente a la nota que
-      // abre Granola). El main cierra este banner al arrancar la sesión.
-      window.uyari.overlay.focusMain()
+      // NO abrir la app: al arrancar la sesión, el main cierra este banner y
+      // muestra el nub flotante (te quedás en tu reunión, patrón Granola).
     } catch {
       // Sin sesión o backend caído: llevar a la app para que el usuario
       // vea qué pasa (login / error) en vez de fallar en silencio.

@@ -413,6 +413,27 @@ body {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-float);
   user-select: none;
+  /* Entrada deslizando desde la derecha con un toque de spring (réplica del
+     x:100%→0, opacity:.3→1 de Granola). El cubic-bezier con overshoot imita
+     el spring de Framer (stiffness 300 / damping 30). */
+  animation: det-banner-in 440ms cubic-bezier(0.32, 1.28, 0.5, 1) both;
+}
+
+@keyframes det-banner-in {
+  from {
+    transform: translateX(115%);
+    opacity: 0.3;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .det-banner {
+    animation: none;
+  }
 }
 
 .det-banner-icon {

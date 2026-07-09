@@ -26,6 +26,11 @@ export function createDetectionBanner(label: string): BrowserWindow {
     skipTaskbar: true,
     focusable: false,
     show: false,
+    // NSPanel: flota sobre apps en pantalla completa (Zoom) sin activarse ni
+    // robar foco, y no aparece como ventana suelta en Mission Control (patrón
+    // Granola para su banner de detección).
+    type: 'panel',
+    hiddenInMissionControl: true,
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.mjs'),
       contextIsolation: true,
@@ -33,8 +38,14 @@ export function createDetectionBanner(label: string): BrowserWindow {
     },
   })
 
-  win.setAlwaysOnTop(true, 'floating')
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  // 'screen-saver' (no 'floating'): queda por encima de la ventana de Zoom
+  // aun en pantalla completa. skipTransformProcessType evita que mostrarlo
+  // cambie el tipo de proceso de la app (parpadeo de Dock/foco).
+  win.setAlwaysOnTop(true, 'screen-saver')
+  win.setVisibleOnAllWorkspaces(true, {
+    visibleOnFullScreen: true,
+    skipTransformProcessType: true,
+  })
 
   const query = { view: 'banner', label }
   if (process.env.ELECTRON_RENDERER_URL) {

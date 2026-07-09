@@ -111,4 +111,9 @@ export class ApiClient {
   getMeeting(clientSessionId: string): Promise<MeetingDetailData> {
     return this.request(`/meetings/${clientSessionId}`)
   }
+
+  /** Activa (idempotente) el link público y devuelve la URL para compartir. */
+  share(clientSessionId: string): Promise<{ url: string }> {
+    return this.request(`/meetings/${clientSessionId}/share`, { method: 'POST', body: '{}' })
+  }
 }

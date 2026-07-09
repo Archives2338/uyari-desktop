@@ -26,6 +26,7 @@ export const IPC = {
   meetingsList: 'meetings:list',
   meetingsGet: 'meetings:get',
   meetingsAsk: 'meetings:ask',
+  meetingsShare: 'meetings:share',
   // renderer → main (fire-and-forget, alto volumen)
   micChunk: 'mic:chunk',
   micError: 'mic:error',
@@ -68,6 +69,8 @@ export interface UyariBridge {
     list(params?: { cursor?: string; limit?: number }): Promise<MeetingListPage>
     get(clientSessionId: string): Promise<MeetingDetailData>
     ask(clientSessionId: string, question: string): Promise<{ answer: string }>
+    /** Activa el link público de solo-lectura y devuelve la URL. */
+    share(clientSessionId: string): Promise<{ url: string }>
   }
   mic: {
     /** PCM16 mono al sample rate pedido por el main. */

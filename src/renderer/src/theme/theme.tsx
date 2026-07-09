@@ -3,11 +3,11 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 // Sistema de temas del handoff (design_handoff_uyari 3/ui_kits/desktop):
 // dos temas por OVERRIDES de variables CSS sobre un wrapper — los
 // componentes no saben de temas, solo leen tokens. Light usa un tono de
-// papel curado (#F7F5F0, más descansado que el blanco puro); Dark es la
-// paleta DESK_DARK del widget. Por ahora el tema SIGUE AL SISTEMA
-// (prefers-color-scheme); el override manual llegará con Settings.
+// papel cálido (#FAF9F5, crema suave — más descansado y "editorial" que
+// el blanco puro); Dark es la paleta DESK_DARK del widget. Por ahora el
+// tema SIGUE AL SISTEMA (prefers-color-scheme); el override manual con Settings.
 
-export const PAPER_DEFAULT = '#F7F5F0'
+export const PAPER_DEFAULT = '#FAF9F5'
 
 // Paleta dark — copiada 1:1 de Flow.js.txt (DESK_DARK).
 export const DESK_DARK: Record<string, string> = {

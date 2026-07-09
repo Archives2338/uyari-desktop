@@ -32,6 +32,7 @@ export function MeetingDetail({ clientSessionId }: { clientSessionId: string }):
   const [loadError, setLoadError] = useState('')
   const [showTranscript, setShowTranscript] = useState(true)
   const [copied, setCopied] = useState(false)
+  const [shareState, setShareState] = useState<'idle' | 'sharing' | 'copied' | 'error'>('idle')
   const [question, setQuestion] = useState('')
   const [qa, setQa] = useState<QaEntry[]>([])
 
@@ -81,6 +82,19 @@ export function MeetingDetail({ clientSessionId }: { clientSessionId: string }):
     }
   }
 
+  const shareLink = async (): Promise<void> => {
+    setShareState('sharing')
+    try {
+      const { url } = await window.uyari.meetings.share(clientSessionId)
+      await navigator.clipboard.writeText(url)
+      setShareState('copied')
+      setTimeout(() => setShareState('idle'), 2000)
+    } catch {
+      setShareState('error')
+      setTimeout(() => setShareState('idle'), 2500)
+    }
+  }
+
   const copyTranscript = async (): Promise<void> => {
     if (!meeting) return
     const text = groupCaptions(toCaptions(meeting.segments))
@@ -112,7 +126,25 @@ export function MeetingDetail({ clientSessionId }: { clientSessionId: string }):
           {meeting && (
             <>
               <div className="detail-header">
-                <h1 className="detail-title">{meeting.title || 'Untitled meeting'}</h1>
+                <div className="detail-header-top">
+                  <h1 className="detail-title">{meeting.title || 'Untitled meeting'}</h1>
+                  {meeting.summary?.status === 'DONE' && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={shareState === 'sharing'}
+                      onClick={() => void shareLink()}
+                    >
+                      {shareState === 'copied'
+                        ? 'Link copied ✓'
+                        : shareState === 'sharing'
+                          ? 'Creating…'
+                          : shareState === 'error'
+                            ? 'Try again'
+                            : 'Share'}
+                    </Button>
+                  )}
+                </div>
                 <div className="detail-meta">
                   <span className="detail-tag">{PLATFORM_LABEL[meeting.platform]}</span>
                   <span>{new Date(meeting.startedAt).toLocaleString()}</span>

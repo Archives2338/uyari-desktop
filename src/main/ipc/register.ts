@@ -47,6 +47,7 @@ export function registerIpc({ settings, api, meetings, overlay }: Services): voi
   ipcMain.handle(IPC.meetingsAsk, (_e, clientSessionId: string, question: string) =>
     api.ask(clientSessionId, question),
   )
+  ipcMain.handle(IPC.meetingsShare, (_e, clientSessionId: string) => api.share(clientSessionId))
 
   // Audio del mic: alto volumen, fire-and-forget (send, no invoke).
   ipcMain.on(IPC.micChunk, (_e, chunk: ArrayBuffer) => meetings.acceptAudio(chunk))

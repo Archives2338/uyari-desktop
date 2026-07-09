@@ -8,19 +8,22 @@ import type { CaptionSegment, CaptureStatus } from '@shared/domain'
 import type { MicControlPort, SttTokenProvider } from './assemblyai.engine'
 
 // Motor "fase 2c": DOS canales STT con separación de hablantes de fábrica.
-//   - "You"  → micrófono del renderer (el camino ya probado de 2b)
-//   - "Them" → audio del sistema vía el helper Swift (Core Audio process
-//     tap, patrón Granola — ver native/audio-helper/main.swift)
+//   - "You"  → micrófono capturado por el helper con voice processing
+//     (la AEC del sistema resta lo que suena por los parlantes → la voz de
+//     los demás no se duplica en tu canal, incluso sin audífonos)
+//   - "Them" → audio del sistema vía Core Audio process tap (patrón
+//     Granola — ver native/audio-helper/main.swift)
 //
-// El helper es un child process que escribe PCM16LE mono 16 kHz por stdout
-// en frames de 50 ms — mismo formato que el mic, así que ambos canales
-// comparten AssemblyAiStream (conexión, backlog, reconexión, todo igual).
+// Protocolo del helper: frames binarios de 1601 bytes por stdout =
+// [1 byte canal (0=mic, 1=sistema)][1600 bytes PCM16LE mono 16 kHz].
 //
-// Si el helper no puede arrancar (típicamente: falta el permiso TCC de
-// System Audio Recording), degradamos a mic-only con aviso visible en vez
-// de tumbar la sesión.
+// Degradación: si el helper no arranca o muere (típicamente falta el
+// permiso TCC de System Audio Recording), caemos al mic del renderer
+// (comportamiento 2b) con aviso visible — la sesión nunca se tumba.
 
-const CHUNK_BYTES = 1600 // 800 samples * 2 bytes = 50 ms
+const PCM_BYTES = 1600 // 800 samples * 2 = 50 ms
+const FRAME_BYTES = 1 + PCM_BYTES
+const CHANNEL_MIC = 0
 
 function helperPath(): string {
   return app.isPackaged
@@ -34,6 +37,7 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
   private helper: ChildProcessByStdio<Writable, Readable, Readable> | null = null
   private stdoutRemainder: Buffer = Buffer.alloc(0)
   private stopping = false
+  private rendererMicActive = false
   private statusByChannel = new Map<string, CaptureStatus>()
 
   constructor(
@@ -65,20 +69,15 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
 
   async start(): Promise<void> {
     this.stopping = false
-    // El mic es el canal principal: si falla, la sesión falla.
+    // El canal del mic es el principal: si su STT falla, la sesión falla.
     await this.you.start()
-    this.mic.start(STREAM_SAMPLE_RATE)
-    // El audio del sistema es best-effort: sin permiso TCC degradamos.
     try {
       await this.them.start()
       this.spawnHelper()
     } catch (err) {
       console.error('[native] canal de sistema no disponible:', err)
       await this.them.stop()
-      this.emitStatus(
-        'recording',
-        'System audio unavailable — only your microphone is being transcribed.',
-      )
+      this.fallbackToRendererMic('System audio unavailable — only your microphone is being transcribed.')
     }
   }
 
@@ -94,12 +93,13 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
     this.helper = helper
 
     helper.stdout.on('data', (data: Buffer) => {
-      // Reagrupar el stream en frames exactos de 50 ms.
       this.stdoutRemainder = Buffer.concat([this.stdoutRemainder, data])
-      while (this.stdoutRemainder.length >= CHUNK_BYTES) {
-        const chunk = this.stdoutRemainder.subarray(0, CHUNK_BYTES)
-        this.stdoutRemainder = this.stdoutRemainder.subarray(CHUNK_BYTES)
-        this.them.acceptAudio(chunk)
+      while (this.stdoutRemainder.length >= FRAME_BYTES) {
+        const channel = this.stdoutRemainder[0]
+        const pcm = this.stdoutRemainder.subarray(1, FRAME_BYTES)
+        this.stdoutRemainder = this.stdoutRemainder.subarray(FRAME_BYTES)
+        if (channel === CHANNEL_MIC) this.you.acceptAudio(pcm)
+        else this.them.acceptAudio(pcm)
       }
     })
     helper.stderr.on('data', (data: Buffer) => {
@@ -112,14 +112,20 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
   }
 
   private onHelperGone(reason: string): void {
-    console.error('[native] audio del sistema caído:', reason)
+    console.error('[native] helper de audio caído:', reason)
     this.helper = null
     void this.them.stop()
-    // Degradar, no tumbar: el mic sigue transcribiendo.
-    this.emitStatus(
-      'recording',
+    this.fallbackToRendererMic(
       'System audio stopped — check System Audio Recording permission. Your microphone keeps working.',
     )
+  }
+
+  /** Sin helper no hay mic nativo: volver al mic del renderer (modo 2b). */
+  private fallbackToRendererMic(notice: string): void {
+    if (this.stopping || this.rendererMicActive) return
+    this.rendererMicActive = true
+    this.mic.start(STREAM_SAMPLE_RATE)
+    this.emitStatus('recording', notice)
   }
 
   setNetworkOnline(online: boolean): void {
@@ -127,16 +133,19 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
     this.them.setNetworkOnline(online)
   }
 
+  /** Chunks del mic del renderer: solo se usan en el modo fallback. */
   acceptAudio(chunk: ArrayBuffer): void {
-    this.you.acceptAudio(chunk)
+    if (this.rendererMicActive) this.you.acceptAudio(chunk)
   }
 
   async stop(): Promise<void> {
     this.stopping = true
-    this.mic.stop()
+    if (this.rendererMicActive) {
+      this.mic.stop()
+      this.rendererMicActive = false
+    }
     if (this.helper) {
-      // Cerrar stdin = señal de salida limpia para el helper (y SIGTERM de
-      // respaldo por si quedó colgado).
+      // Cerrar stdin = señal de salida limpia (SIGTERM de respaldo).
       const helper = this.helper
       this.helper = null
       try {

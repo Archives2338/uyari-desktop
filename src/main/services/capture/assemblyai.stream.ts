@@ -30,6 +30,21 @@ const WS_BASE = 'wss://streaming.assemblyai.com/v3/ws'
 const SESSION_ROTATE_MS = (10800 - 300) * 1000
 const MAX_BACKLOG_CHUNKS = 6000 // 5 min de audio (~9.6 MB)
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 10000]
+// Reintentos de la conexión INICIAL antes de tumbar la sesión: un WiFi
+// flojo al arrancar no debe matar la reunión (la reconexión en vivo ya
+// cubre las caídas posteriores).
+const INITIAL_CONNECT_ATTEMPTS = 5
+
+const QUOTA_MESSAGE = 'Alcanzaste tu límite de transcripción de este mes.'
+
+/** El backend respondió 402: cuota de STT agotada (error terminal). */
+function isQuotaError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: string }).code === 'STT_QUOTA_EXCEEDED'
+  )
+}
 
 // Socket estancado (WiFi caído sin que TCP lo note): bufferedAmount crece.
 const STALL_CHECK_MS = 2000
@@ -87,10 +102,41 @@ export class AssemblyAiStream extends EventEmitter {
     return `[stt:${this.opts.channel}]`
   }
 
+  /** Segundos de audio efectivamente enviados (50 ms por chunk). */
+  streamedSeconds(): number {
+    return (this.chunksSent * 50) / 1000
+  }
+
   async start(): Promise<void> {
     this.stopping = false
     this.captureStartMs = Date.now()
-    await this.connect()
+    await this.connectWithRetry()
+  }
+
+  /**
+   * Conexión inicial con reintentos: un fallo transitorio al arrancar (WiFi
+   * flojo, backend despertando) reintenta con backoff en vez de tumbar la
+   * sesión. La cuota agotada (402) es terminal y se propaga de inmediato.
+   */
+  private async connectWithRetry(): Promise<void> {
+    for (let attempt = 0; attempt < INITIAL_CONNECT_ATTEMPTS; attempt++) {
+      if (this.stopping) return
+      try {
+        await this.connect()
+        return
+      } catch (err) {
+        if (isQuotaError(err)) throw err
+        if (this.stopping) return
+        if (attempt === INITIAL_CONNECT_ATTEMPTS - 1) {
+          throw err instanceof Error ? err : new Error(String(err))
+        }
+        const delay = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)]
+        console.warn(
+          `${this.tag()} conexión inicial falló (intento ${attempt + 1}/${INITIAL_CONNECT_ATTEMPTS}), reintentando en ${delay} ms`,
+        )
+        await new Promise((r) => setTimeout(r, delay))
+      }
+    }
   }
 
   private async connect(): Promise<void> {
@@ -107,8 +153,12 @@ export class AssemblyAiStream extends EventEmitter {
       const ws = new WebSocket(url)
       ws.binaryType = 'arraybuffer'
       this.ws = ws
+      // Distinguir "falló antes de abrir" (reintento lo maneja quien llama)
+      // de "se cayó ya conectado" (reconexión en vivo vía onConnectionLost).
+      let opened = false
 
       ws.onopen = () => {
+        opened = true
         this.epoch += 1
         this.epochStartOffsetMs = Date.now() - this.captureStartMs
         this.reconnectAttempt = 0
@@ -122,11 +172,22 @@ export class AssemblyAiStream extends EventEmitter {
       }
       ws.onmessage = (ev) => this.onMessage(ev)
       ws.onerror = () => {
+        if (opened) return // ya conectado: el cierre lo maneja onclose
+        this.ws = null
+        try {
+          ws.close()
+        } catch {
+          // ya está muerta
+        }
         reject(new Error('WebSocket STT falló al conectar'))
-        this.onConnectionLost('error de conexión')
       }
       ws.onclose = (ev) => {
         const detail = `${ev.code}${ev.reason ? `: ${ev.reason}` : ''}`
+        if (!opened) {
+          this.ws = null
+          reject(new Error(`WebSocket STT cerró antes de abrir (${detail})`))
+          return
+        }
         this.onConnectionLost(detail)
       }
     })
@@ -182,7 +243,9 @@ export class AssemblyAiStream extends EventEmitter {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
     this.reconnectTimer = null
     this.reconnectAttempt = 0
-    this.connect().catch(() => this.scheduleReconnect())
+    this.connect().catch((err: unknown) =>
+      isQuotaError(err) ? this.giveUp() : this.scheduleReconnect(),
+    )
   }
 
   private onConnectionLost(detail: string): void {
@@ -204,10 +267,28 @@ export class AssemblyAiStream extends EventEmitter {
       this.reconnectTimer = null
       if (this.stopping) return
       this.connect().catch((err: unknown) => {
+        if (isQuotaError(err)) return this.giveUp()
         console.warn(`${this.tag()} reintento fallido:`, err instanceof Error ? err.message : err)
         this.scheduleReconnect()
       })
     }, delay)
+  }
+
+  /**
+   * Corte terminal (cuota agotada): parar todos los timers y reportar error.
+   * A diferencia de una caída de red, aquí NO tiene sentido reintentar.
+   */
+  private giveUp(): void {
+    if (this.stopping) return
+    this.stopping = true
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
+    if (this.rotateTimer) clearTimeout(this.rotateTimer)
+    if (this.stallTimer) clearInterval(this.stallTimer)
+    this.reconnectTimer = null
+    this.rotateTimer = null
+    this.stallTimer = null
+    console.warn(`${this.tag()} ${QUOTA_MESSAGE}`)
+    this.emit('status', 'error' satisfies CaptureStatus, QUOTA_MESSAGE)
   }
 
   private scheduleRotation(): void {
@@ -224,7 +305,9 @@ export class AssemblyAiStream extends EventEmitter {
       } catch {
         // seguir con la sesión nueva igual
       }
-      this.connect().catch(() => this.scheduleReconnect())
+      this.connect().catch((err: unknown) =>
+        isQuotaError(err) ? this.giveUp() : this.scheduleReconnect(),
+      )
     }, SESSION_ROTATE_MS)
   }
 

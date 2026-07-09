@@ -11,6 +11,11 @@ export interface CaptureEngine {
   start(): Promise<void>
   /** Detiene y libera recursos. Idempotente. */
   stop(): Promise<void>
+  /**
+   * Segundos de audio transmitidos al STT en toda la sesión (suma de canales
+   * en el motor nativo). Los motores sin costo de STT (mock) devuelven 0.
+   */
+  streamedSeconds(): number
   on(event: 'segment', listener: (segment: CaptionSegment) => void): this
   on(event: 'status', listener: (status: CaptureStatus, detail?: string) => void): this
   removeAllListeners(): this
@@ -19,6 +24,11 @@ export interface CaptureEngine {
 export abstract class BaseCaptureEngine extends EventEmitter implements CaptureEngine {
   abstract start(): Promise<void>
   abstract stop(): Promise<void>
+
+  /** Por defecto sin consumo de STT; los motores con STT lo sobrescriben. */
+  streamedSeconds(): number {
+    return 0
+  }
 
   protected emitSegment(segment: CaptionSegment): void {
     this.emit('segment', segment)

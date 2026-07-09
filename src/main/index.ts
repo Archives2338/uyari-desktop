@@ -58,7 +58,10 @@ if (!app.requestSingleInstanceLock()) {
 
     // Auto-detección de reunión: si una app de reuniones enciende el mic y
     // no estamos grabando, banner en la app + notificación del sistema.
-    const monitor = new MicMonitorService((label) => {
+    const monitor = new MicMonitorService(({ label, platform }) => {
+      // Recordar la plataforma detectada aunque ya estemos grabando: fija la
+      // app real (Zoom/Teams/Meet) para la próxima sesión.
+      if (platform) meetings.setPlatformHint(platform)
       if (meetings.state()) return
       broadcast(IPC.evMeetingDetected, { label })
       const notification = new Notification({

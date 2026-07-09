@@ -126,6 +126,10 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
     this.them.setNetworkOnline(online)
   }
 
+  streamedSeconds(): number {
+    return this.you.streamedSeconds() + this.them.streamedSeconds()
+  }
+
   /** Chunks del mic del renderer: solo se usan en el modo fallback. */
   acceptAudio(chunk: ArrayBuffer): void {
     if (this.rendererMicActive) this.you.acceptAudio(chunk)

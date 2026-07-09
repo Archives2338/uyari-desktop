@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { powerSaveBlocker } from 'electron'
-import type { CaptionSegment, SessionInfo } from '@shared/domain'
+import type { CaptionSegment, Platform, SessionInfo } from '@shared/domain'
 import type { ApiClient } from './api.client'
 import type { CaptureEngine } from './capture'
 import type { TranscriptStore } from './transcript.store'
@@ -23,6 +23,11 @@ export class MeetingService {
   private session: SessionInfo | null = null
   private buffer = new Map<string, CaptionSegment>()
   private ingestedAny = false
+  // Última plataforma detectada por el mic-monitor (Zoom/Teams/Meet). La usa
+  // el próximo start() en vez de un valor fijo — así el backend registra la
+  // app real de la reunión. Default Zoom: el caso más común en desktop nativo
+  // (Meet lo cubre la extensión).
+  private platformHint: Platform = 'ZOOM'
   // Mismo patrón que Granola: prevent-display-sleep con guard idempotente
   // — si la pantalla duerme a mitad de reunión, la captura muere con ella.
   private powerBlockerId: number | undefined
@@ -39,6 +44,11 @@ export class MeetingService {
     this.listener = listener
   }
 
+  /** El mic-monitor detectó una app de reunión: recordar su plataforma. */
+  setPlatformHint(platform: Platform): void {
+    this.platformHint = platform
+  }
+
   state(): SessionInfo | null {
     return this.session
   }
@@ -49,7 +59,7 @@ export class MeetingService {
     this.session = {
       clientSessionId: randomUUID(),
       title: title ?? `Meeting ${new Date().toLocaleString()}`,
-      platform: 'ZOOM',
+      platform: this.platformHint,
       startedAtMs: Date.now(),
       status: 'recording',
     }
@@ -180,6 +190,11 @@ export class MeetingService {
       this.powerBlockerId = undefined
     }
 
+    // Segundos de audio realmente transmitidos al STT (suma de canales).
+    // Se reportan al backend para medir el consumo del plan — solo el
+    // desktop consume STT; la extensión captions-only nunca llama a esto.
+    const sttSeconds = Math.round(this.engine?.streamedSeconds() ?? 0)
+
     await this.engine?.stop()
     this.engine?.removeAllListeners()
     this.engine = null
@@ -199,6 +214,10 @@ export class MeetingService {
       }
     }
     if (finished || !this.ingestedAny) this.store.closeSession(this.session.clientSessionId)
+
+    // Best-effort: medir el consumo de STT del plan. No bloquea el stop ni
+    // importa si falla (el gate real está en la emisión del token).
+    if (sttSeconds > 0) void this.api.reportSttUsage(sttSeconds).catch(() => {})
 
     this.session = null
     this.buffer.clear()

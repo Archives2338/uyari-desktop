@@ -16,6 +16,14 @@ export class ApiError extends Error {
   }
 }
 
+/** El plan del usuario agotó su cuota mensual de transcripción (STT). */
+export class SttQuotaError extends Error {
+  readonly code = 'STT_QUOTA_EXCEEDED'
+  constructor(message = 'Alcanzaste tu límite de transcripción de este mes.') {
+    super(message)
+  }
+}
+
 export class ApiClient {
   constructor(private readonly settings: SettingsStore) {}
 
@@ -63,8 +71,19 @@ export class ApiClient {
   }
 
   /** Token efímero para abrir el WebSocket de STT directo al proveedor. */
-  sttToken(): Promise<{ provider: 'assemblyai'; token: string; expiresInSeconds: number }> {
-    return this.request('/stt/token', { method: 'POST', body: '{}' })
+  async sttToken(): Promise<{ provider: 'assemblyai'; token: string; expiresInSeconds: number }> {
+    try {
+      return await this.request('/stt/token', { method: 'POST', body: '{}' })
+    } catch (err) {
+      // 402 = cuota agotada: error terminal, no tiene sentido reintentar.
+      if (err instanceof ApiError && err.status === 402) throw new SttQuotaError()
+      throw err
+    }
+  }
+
+  /** Reporta segundos de STT consumidos (best-effort; medición del plan). */
+  reportSttUsage(seconds: number): Promise<{ ok: boolean }> {
+    return this.request('/stt/usage', { method: 'POST', body: JSON.stringify({ seconds }) })
   }
 
   ask(clientSessionId: string, question: string): Promise<{ answer: string }> {

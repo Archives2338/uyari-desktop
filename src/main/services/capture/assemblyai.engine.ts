@@ -38,6 +38,10 @@ export class AssemblyAiMicEngine extends BaseCaptureEngine {
     this.stream.acceptAudio(chunk)
   }
 
+  streamedSeconds(): number {
+    return this.stream.streamedSeconds()
+  }
+
   setNetworkOnline(online: boolean): void {
     this.stream.setNetworkOnline(online)
   }

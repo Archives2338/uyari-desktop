@@ -38,6 +38,8 @@ export function registerIpc({ settings, api, meetings, overlay }: Services): voi
 
   ipcMain.handle(IPC.captureStart, (_e, title?: string) => meetings.start(title))
   ipcMain.handle(IPC.captureStop, () => meetings.stop())
+  ipcMain.handle(IPC.capturePause, () => meetings.pause())
+  ipcMain.handle(IPC.captureResume, () => meetings.resume())
   ipcMain.handle(IPC.captureState, () => meetings.state())
 
   ipcMain.handle(IPC.meetingsList, (_e, params?: { cursor?: string; limit?: number }) =>

@@ -22,6 +22,8 @@ export const IPC = {
   permissionsOpenScreenSettings: 'permissions:open-screen-settings',
   captureStart: 'capture:start',
   captureStop: 'capture:stop',
+  capturePause: 'capture:pause',
+  captureResume: 'capture:resume',
   captureState: 'capture:state',
   meetingsList: 'meetings:list',
   meetingsGet: 'meetings:get',
@@ -63,6 +65,10 @@ export interface UyariBridge {
   capture: {
     start(title?: string): Promise<SessionInfo>
     stop(): Promise<{ finished: boolean }>
+    /** Pausa la captura sin cerrar la sesión (retomable, sin resumen aún). */
+    pause(): Promise<SessionInfo | null>
+    /** Retoma una sesión pausada en un tramo nuevo. */
+    resume(): Promise<SessionInfo | null>
     state(): Promise<SessionInfo | null>
   }
   meetings: {

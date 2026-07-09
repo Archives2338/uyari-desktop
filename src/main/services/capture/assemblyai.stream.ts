@@ -80,6 +80,11 @@ export class AssemblyAiStream extends EventEmitter {
   private captureStartMs = 0
   private epoch = 0
   private epochStartOffsetMs = 0
+  // Tramo de captura (0 = arranque, +1 por cada resume). Ver CaptureStartOptions.
+  private take = 0
+  // Desplazamiento del tramo en la línea de tiempo de la sesión (ms desde el
+  // inicio real, incluyendo el hueco de las pausas). Se suma al tsOffsetMs.
+  private baseOffsetMs = 0
 
   private backlog: Buffer[] = []
   private droppedChunks = 0
@@ -107,8 +112,10 @@ export class AssemblyAiStream extends EventEmitter {
     return (this.chunksSent * 50) / 1000
   }
 
-  async start(): Promise<void> {
+  async start(opts?: { take?: number; baseOffsetMs?: number }): Promise<void> {
     this.stopping = false
+    this.take = opts?.take ?? 0
+    this.baseOffsetMs = opts?.baseOffsetMs ?? 0
     this.captureStartMs = Date.now()
     await this.connectWithRetry()
   }
@@ -378,16 +385,19 @@ export class AssemblyAiStream extends EventEmitter {
     const turn = msg as TurnMessage
     if (!turn.transcript) return
     const inSession = turn.words?.[0]?.start ?? Date.now() - this.captureStartMs - this.epochStartOffsetMs
-    const tsOffsetMs = this.epochStartOffsetMs + inSession
+    // Offset dentro de ESTE tramo (relativo a su propio captureStartMs). El
+    // desfase se mide con esto; a la línea de tiempo de la sesión se le suma
+    // baseOffsetMs recién al emitir el segmento.
+    const takeOffsetMs = this.epochStartOffsetMs + inSession
     if (turn.end_of_turn) {
-      const lagS = (Date.now() - (this.captureStartMs + tsOffsetMs)) / 1000
+      const lagS = (Date.now() - (this.captureStartMs + takeOffsetMs)) / 1000
       console.log(`${this.tag()} turn ${this.epoch}-${turn.turn_order} desfase ~${lagS.toFixed(1)}s`)
     }
     const segment: CaptionSegment = {
-      providerMessageId: `aai-${this.opts.channel}-${this.epoch}-${turn.turn_order}`,
+      providerMessageId: `aai-${this.opts.channel}-t${this.take}-${this.epoch}-${turn.turn_order}`,
       speaker: this.opts.speaker,
       text: turn.transcript,
-      tsOffsetMs,
+      tsOffsetMs: this.baseOffsetMs + takeOffsetMs,
     }
     this.emit('segment', segment)
   }

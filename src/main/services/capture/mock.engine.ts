@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { BaseCaptureEngine } from './engine'
+import { BaseCaptureEngine, type CaptureStartOptions } from './engine'
 
 // Motor de captura falso para desarrollar UI y pipeline sin audio real:
 // emite una conversación inventada a ritmo humano. Sirve para validar
@@ -23,7 +23,7 @@ export class MockCaptureEngine extends BaseCaptureEngine {
   private index = 0
   private startedAt = 0
 
-  async start(): Promise<void> {
+  async start(_opts?: CaptureStartOptions): Promise<void> {
     this.index = 0
     this.startedAt = Date.now()
     this.emitStatus('recording')

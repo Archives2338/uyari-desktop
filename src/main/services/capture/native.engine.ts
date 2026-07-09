@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process'
 import type { Readable, Writable } from 'node:stream'
 import { helperPath } from './helper-path'
-import { BaseCaptureEngine } from './engine'
+import { BaseCaptureEngine, type CaptureStartOptions } from './engine'
 import { AssemblyAiStream, STREAM_SAMPLE_RATE } from './assemblyai.stream'
 import type { CaptionSegment, CaptureStatus } from '@shared/domain'
 import type { MicControlPort, SttTokenProvider } from './assemblyai.engine'
@@ -69,12 +69,13 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
     this.emitStatus(status, detail)
   }
 
-  async start(): Promise<void> {
+  async start(opts?: CaptureStartOptions): Promise<void> {
     this.stopping = false
+    this.micReady = false
     // El canal del mic es el principal: si su STT falla, la sesión falla.
-    await this.you.start()
+    await this.you.start(opts)
     try {
-      await this.them.start()
+      await this.them.start(opts)
       this.spawnHelper()
     } catch (err) {
       console.error('[native] canal de sistema no disponible:', err)

@@ -65,6 +65,8 @@ export function OverlayPill(): React.JSX.Element {
   if (!session) return <></>
   const reconnecting = session.status === 'reconnecting'
   const preparingMic = session.status === 'starting'
+  const paused = session.status === 'paused'
+  const dim = reconnecting || paused // punto ámbar: no está grabando en vivo
   const openApp = (): void => window.uyari.overlay.focusMain()
 
   return (
@@ -76,13 +78,13 @@ export function OverlayPill(): React.JSX.Element {
       >
         <img src={appIcon} className="nub-dock-icon" alt="Uyari" />
         <span className="nub-dock-dots">
-          <i className={reconnecting ? 'nub-dock-dot nub-dock-dot-amber' : 'nub-dock-dot'} />
+          <i className={dim ? 'nub-dock-dot nub-dock-dot-amber' : 'nub-dock-dot'} />
           <i
-            className={reconnecting ? 'nub-dock-dot nub-dock-dot-amber' : 'nub-dock-dot'}
+            className={dim ? 'nub-dock-dot nub-dock-dot-amber' : 'nub-dock-dot'}
             style={{ opacity: 0.6, animationDelay: '160ms' }}
           />
           <i
-            className={reconnecting ? 'nub-dock-dot nub-dock-dot-amber' : 'nub-dock-dot'}
+            className={dim ? 'nub-dock-dot nub-dock-dot-amber' : 'nub-dock-dot'}
             style={{ opacity: 0.3, animationDelay: '320ms' }}
           />
         </span>
@@ -90,9 +92,18 @@ export function OverlayPill(): React.JSX.Element {
 
       <div className={expanded ? 'nub-popover nub-popover-open' : 'nub-popover'}>
         <div className="nub-popover-header">
-          <span className={reconnecting ? 'nub-dot nub-dot-amber' : 'nub-dot'} />
+          <span className={dim ? 'nub-dot nub-dot-amber' : 'nub-dot'} />
           <span className="nub-title">{session.title}</span>
           <span className="nub-time">{formatElapsed(session.startedAtMs)}</span>
+          <button
+            className="nub-pause"
+            title={paused ? 'Resume' : 'Pause'}
+            onClick={() =>
+              void (paused ? window.uyari.capture.resume() : window.uyari.capture.pause())
+            }
+          >
+            {paused ? '▶' : '❚❚'}
+          </button>
           <button
             className="nub-stop"
             title="Finish & summarize"
@@ -107,9 +118,11 @@ export function OverlayPill(): React.JSX.Element {
             <p className="nub-empty">
               {reconnecting
                 ? 'Reconnecting to transcription…'
-                : preparingMic
-                  ? 'Starting microphone…'
-                  : 'Listening… captions will appear here.'}
+                : paused
+                  ? 'Paused — tap ▶ to resume.'
+                  : preparingMic
+                    ? 'Starting microphone…'
+                    : 'Listening… captions will appear here.'}
             </p>
           ) : (
             <div className="nub-transcript">

@@ -53,6 +53,8 @@ export function Home(): React.JSX.Element {
     captions,
     startCapture,
     stopCapture,
+    pauseCapture,
+    resumeCapture,
     detectedMeeting,
     setDetectedMeeting,
     openMeeting,
@@ -80,10 +82,12 @@ export function Home(): React.JSX.Element {
       .finally(() => setMeetingsLoaded(true))
   }, [])
 
+  const paused = session?.status === 'paused'
   const active =
     session?.status === 'recording' ||
     session?.status === 'reconnecting' ||
-    session?.status === 'starting'
+    session?.status === 'starting' ||
+    paused
   const reconnecting = session?.status === 'reconnecting'
   const preparingMic = session?.status === 'starting'
   const showEmptyState = !session && captions.length === 0 && meetingsLoaded && meetings.length === 0
@@ -131,7 +135,7 @@ export function Home(): React.JSX.Element {
           >
             {active ? (
               <>
-                <span className="rec-dot" />
+                <span className={paused ? 'rec-dot rec-dot-paused' : 'rec-dot'} />
                 {session?.title}
               </>
             ) : (
@@ -203,16 +207,27 @@ export function Home(): React.JSX.Element {
                   </span>
                   <span style={{ font: 'var(--text-xs)', fontWeight: 500, color: 'var(--accent-strong)' }}>
                     {active
-                      ? preparingMic
-                        ? S.home.micStarting
-                        : S.home.recording
+                      ? paused
+                        ? S.home.paused
+                        : preparingMic
+                          ? S.home.micStarting
+                          : S.home.recording
                       : S.home.firstNoteSub}
                   </span>
                 </span>
                 {active ? (
-                  <Button variant="secondary" size="sm" onClick={() => void stopCapture()}>
-                    {S.home.stop}
-                  </Button>
+                  <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => void (paused ? resumeCapture() : pauseCapture())}
+                    >
+                      {paused ? S.home.resume : S.home.pause}
+                    </Button>
+                    <Button variant="secondary" size="sm" onClick={() => void stopCapture()}>
+                      {S.home.stop}
+                    </Button>
+                  </div>
                 ) : (
                   <Button size="sm" onClick={() => void startCapture()}>
                     {S.home.startCapture}

@@ -22,7 +22,16 @@ export interface PermissionsStatus {
 // no confirmó su primer frame real — activar voice processing en macOS
 // toma ~1s; mostrar 'recording' antes de eso hace que se pierdan las
 // primeras palabras del usuario.
-export type CaptureStatus = 'idle' | 'starting' | 'recording' | 'reconnecting' | 'stopping' | 'error'
+// 'paused': la captura se detuvo (helper + STT liberados) pero la sesión
+// sigue viva y retomable — el resumen NO se genera hasta el stop definitivo.
+export type CaptureStatus =
+  | 'idle'
+  | 'starting'
+  | 'recording'
+  | 'paused'
+  | 'reconnecting'
+  | 'stopping'
+  | 'error'
 
 export interface SessionInfo {
   clientSessionId: string

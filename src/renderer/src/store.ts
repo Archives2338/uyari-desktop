@@ -19,6 +19,8 @@ interface AppStore {
   login(email: string): Promise<void>
   startCapture(title?: string): Promise<void>
   stopCapture(): Promise<void>
+  pauseCapture(): Promise<void>
+  resumeCapture(): Promise<void>
   pushCaption(segment: CaptionSegment): void
   setSession(session: SessionInfo | null): void
   setDetectedMeeting(label: string | null): void
@@ -53,6 +55,15 @@ export const useApp = create<AppStore>((set, get) => ({
     const clientSessionId = get().session?.clientSessionId
     await window.uyari.capture.stop()
     set({ session: null, captions: [], openMeetingId: clientSessionId ?? null })
+  },
+
+  // Pausa/resume: el main empuja el nuevo estado por onSession, así que aquí
+  // solo disparamos la acción (misma vía que las transiciones de estado).
+  pauseCapture: async () => {
+    await window.uyari.capture.pause()
+  },
+  resumeCapture: async () => {
+    await window.uyari.capture.resume()
   },
 
   pushCaption: (segment) =>

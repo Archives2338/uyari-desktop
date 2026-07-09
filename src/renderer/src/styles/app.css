@@ -66,6 +66,12 @@ body {
   animation: pulse 1.4s infinite;
 }
 
+/* Pausada: punto ámbar fijo (sin latido) — no está grabando en vivo. */
+.rec-dot-paused {
+  background: #f5c451;
+  animation: none;
+}
+
 @keyframes pulse {
   50% {
     opacity: 0.3;
@@ -261,6 +267,24 @@ body {
 }
 
 .nub-stop:hover {
+  background: var(--violet-soft);
+}
+
+.nub-pause {
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  background: var(--surface-sunken);
+  color: var(--text-body);
+  font-size: 8px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.nub-pause:hover {
   background: var(--violet-soft);
 }
 

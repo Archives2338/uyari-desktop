@@ -6,9 +6,22 @@ import type { CaptionSegment, CaptureStatus } from '@shared/domain'
 // pipeline real (helper nativo de audio + STT streaming). Ni el resto del
 // main ni el renderer saben cuál corre.
 
+/**
+ * Un "take" es cada tramo de captura de una misma sesión: el arranque es el
+ * take 0; cada resume tras una pausa incrementa el índice. Sirve para que los
+ * segmentos de tramos distintos no colisionen ni se solapen en el tiempo:
+ *  - `take` entra en el providerMessageId → ids únicos entre tramos.
+ *  - `baseOffsetMs` se suma al tsOffsetMs → el tramo se ubica después del
+ *    anterior en la línea de tiempo (con el hueco natural de la pausa).
+ */
+export interface CaptureStartOptions {
+  take?: number
+  baseOffsetMs?: number
+}
+
 export interface CaptureEngine {
   /** Empieza a emitir segmentos. Resuelve cuando la captura quedó activa. */
-  start(): Promise<void>
+  start(opts?: CaptureStartOptions): Promise<void>
   /** Detiene y libera recursos. Idempotente. */
   stop(): Promise<void>
   /**
@@ -22,7 +35,7 @@ export interface CaptureEngine {
 }
 
 export abstract class BaseCaptureEngine extends EventEmitter implements CaptureEngine {
-  abstract start(): Promise<void>
+  abstract start(opts?: CaptureStartOptions): Promise<void>
   abstract stop(): Promise<void>
 
   /** Por defecto sin consumo de STT; los motores con STT lo sobrescriben. */

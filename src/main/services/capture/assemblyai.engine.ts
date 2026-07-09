@@ -1,4 +1,4 @@
-import { BaseCaptureEngine } from './engine'
+import { BaseCaptureEngine, type CaptureStartOptions } from './engine'
 import { AssemblyAiStream, STREAM_SAMPLE_RATE, type SttTokenProvider } from './assemblyai.stream'
 import type { CaptionSegment, CaptureStatus } from '@shared/domain'
 
@@ -29,8 +29,8 @@ export class AssemblyAiMicEngine extends BaseCaptureEngine {
     )
   }
 
-  async start(): Promise<void> {
-    await this.stream.start()
+  async start(opts?: CaptureStartOptions): Promise<void> {
+    await this.stream.start(opts)
     this.mic.start(MIC_SAMPLE_RATE)
   }
 

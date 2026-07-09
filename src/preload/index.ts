@@ -27,6 +27,8 @@ const bridge: UyariBridge = {
   capture: {
     start: (title) => ipcRenderer.invoke(IPC.captureStart, title),
     stop: () => ipcRenderer.invoke(IPC.captureStop),
+    pause: () => ipcRenderer.invoke(IPC.capturePause),
+    resume: () => ipcRenderer.invoke(IPC.captureResume),
     state: () => ipcRenderer.invoke(IPC.captureState),
   },
   meetings: {

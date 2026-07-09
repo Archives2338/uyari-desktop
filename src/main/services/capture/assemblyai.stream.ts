@@ -85,6 +85,16 @@ export class AssemblyAiStream extends EventEmitter {
   // Desplazamiento del tramo en la línea de tiempo de la sesión (ms desde el
   // inicio real, incluyendo el hueco de las pausas). Se suma al tsOffsetMs.
   private baseOffsetMs = 0
+  // Último turn_order al que ya le medimos el primer parcial (latencia VISIBLE
+  // = cuánto tardó en aparecer el primer texto). Distinto del desfase, que se
+  // mide al final del turno e incluye toda la duración de la frase.
+  private lastPartialTurn = -1
+  // ¿Ya fluyó audio en esta época? AssemblyAI mide sus timestamps relativos al
+  // audio RECIBIDO, no a la apertura del socket: si el primer chunk llega
+  // tarde (p.ej. ~1s de warm-up del voice processing en un arranque en frío),
+  // la época se re-ancla a ese momento — si no, ese hueco infla tsOffsetMs y
+  // las métricas de latencia de toda la sesión.
+  private epochAudioStarted = false
 
   private backlog: Buffer[] = []
   private droppedChunks = 0
@@ -182,6 +192,8 @@ export class AssemblyAiStream extends EventEmitter {
         this.epochStartOffsetMs = Date.now() - this.captureStartMs
         this.reconnectAttempt = 0
         this.recentSent = []
+        this.lastPartialTurn = -1
+        this.epochAudioStarted = false
         console.log(`${this.tag()} WebSocket abierto (época ${this.epoch})`)
         this.flushBacklog()
         this.scheduleRotation()
@@ -362,6 +374,7 @@ export class AssemblyAiStream extends EventEmitter {
     // El backlog ocupa el INICIO del audio de esta sesión pero fue hablado
     // ANTES de reconectar: la época arranca donde empezó el backlog.
     this.epochStartOffsetMs -= seconds * 1000
+    this.epochAudioStarted = true
     console.log(
       `${this.tag()} enviando backlog: ${this.backlog.length} chunks (~${seconds}s)` +
         (this.droppedChunks ? ` — ${this.droppedChunks} chunks descartados por tope` : ''),
@@ -406,7 +419,14 @@ export class AssemblyAiStream extends EventEmitter {
     const takeOffsetMs = this.epochStartOffsetMs + inSession
     if (turn.end_of_turn) {
       const lagS = (Date.now() - (this.captureStartMs + takeOffsetMs)) / 1000
-      console.log(`${this.tag()} turn ${this.epoch}-${turn.turn_order} desfase ~${lagS.toFixed(1)}s`)
+      console.log(`${this.tag()} turn ${this.epoch}-${turn.turn_order} desfase ~${lagS.toFixed(1)}s (final)`)
+    } else if (turn.turn_order !== this.lastPartialTurn) {
+      // Primer parcial de este turno = latencia VISIBLE real (cuánto tardó en
+      // aparecer el primer texto en pantalla). Si nunca aparece esta línea,
+      // AssemblyAI no manda parciales y solo vemos finales (mala UX).
+      this.lastPartialTurn = turn.turn_order
+      const visibleS = (Date.now() - (this.captureStartMs + takeOffsetMs)) / 1000
+      console.log(`${this.tag()} turn ${this.epoch}-${turn.turn_order} 1er texto ~${visibleS.toFixed(1)}s (visible)`)
     }
     const segment: CaptionSegment = {
       providerMessageId: `aai-${this.opts.channel}-t${this.take}-${this.epoch}-${turn.turn_order}`,
@@ -422,6 +442,14 @@ export class AssemblyAiStream extends EventEmitter {
     const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
 
     if (this.ws?.readyState === WebSocket.OPEN) {
+      if (!this.epochAudioStarted) {
+        // Primer audio real de la época (sin backlog previo): re-anclar aquí.
+        // En un arranque en frío el mic tarda ~1s en calentar (warm-up del
+        // voice processing) — ese hueco NO es parte de la línea de tiempo del
+        // audio que AssemblyAI recibe.
+        this.epochAudioStarted = true
+        this.epochStartOffsetMs = Date.now() - this.captureStartMs
+      }
       this.ws.send(buf)
       this.recentSent.push(buf)
       if (this.recentSent.length > RECENT_SENT_MAX) this.recentSent.shift()

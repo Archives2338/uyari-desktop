@@ -1,7 +1,7 @@
 import { app, BrowserWindow, Notification } from 'electron'
 import { IPC } from '@shared/ipc'
 import { createMainWindow } from './windows/main-window'
-import { createOverlayWindow } from './windows/overlay-window'
+import { createOverlayWindow, attachNubBehavior, type NubBehavior } from './windows/overlay-window'
 import { registerIpc } from './ipc/register'
 import { MicMonitorService } from './services/mic-monitor.service'
 import { SettingsStore } from './services/settings.store'
@@ -35,21 +35,32 @@ if (!app.requestSingleInstanceLock()) {
       createCaptureEngine({ api, mic: micControl }),
     )
 
-    registerIpc({ settings, api, meetings })
+    // Overlay nub: existe solo mientras hay sesión activa.
+    let overlay: BrowserWindow | null = null
+    let nub: NubBehavior | null = null
+
+    registerIpc({
+      settings,
+      api,
+      meetings,
+      overlay: { drag: (action) => nub?.drag(action) },
+    })
 
     // Reuniones que quedaron a medias en una corrida anterior (crash o
     // backend caído): subirlas y cerrarlas ahora. Requiere sesión.
     if (settings.token) void meetings.recoverOrphans()
 
-    // Overlay pill: existe solo mientras hay sesión activa.
-    let overlay: BrowserWindow | null = null
     meetings.setListener({
       onCaption: (segment) => broadcast(IPC.evCaption, segment),
       onSession: (session) => {
         broadcast(IPC.evSession, session)
         if (session && !overlay) {
           overlay = createOverlayWindow()
-          overlay.on('closed', () => (overlay = null))
+          nub = attachNubBehavior(overlay)
+          overlay.on('closed', () => {
+            overlay = null
+            nub = null
+          })
         } else if (!session && overlay) {
           overlay.close()
         }

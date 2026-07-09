@@ -4,44 +4,11 @@ import { Button } from '@renderer/ui/Button'
 import { dIcon, useHover } from '@renderer/ui/chrome'
 import { S, WS_COLORS } from '@renderer/strings'
 import { loadFlow } from '@renderer/onboarding/state'
-import type { CaptionSegment } from '@shared/domain'
+import { groupCaptions } from '@renderer/lib/captions'
 
 // Home = paso 9 del kit (sidebar + "Coming up") FUSIONADO con la lógica
 // real que ya existía: banner de reunión detectada, start/stop, estados de
 // reconexión y transcript en vivo. Mismo store, mismos eventos IPC.
-
-// El STT emite un "turn" por cada pausa corta, lo que produce burbujas de
-// una frase. Para leerse como conversación, agrupamos turnos consecutivos
-// del mismo hablante en un bloque, cortando solo ante una pausa larga o
-// cuando el bloque ya es muy largo.
-const GROUP_MAX_GAP_MS = 20_000
-const GROUP_MAX_CHARS = 500
-
-interface CaptionGroup {
-  key: string
-  speaker?: string
-  texts: string[]
-}
-
-function groupCaptions(captions: CaptionSegment[]): CaptionGroup[] {
-  const groups: CaptionGroup[] = []
-  let lastOffset = 0
-  let lastChars = 0
-  for (const c of captions) {
-    const prev = groups[groups.length - 1]
-    const sameSpeaker = prev && prev.speaker === c.speaker
-    const closeInTime = c.tsOffsetMs - lastOffset <= GROUP_MAX_GAP_MS
-    if (prev && sameSpeaker && closeInTime && lastChars < GROUP_MAX_CHARS) {
-      prev.texts.push(c.text)
-      lastChars += c.text.length
-    } else {
-      groups.push({ key: c.providerMessageId, speaker: c.speaker, texts: [c.text] })
-      lastChars = c.text.length
-    }
-    lastOffset = c.tsOffsetMs
-  }
-  return groups
-}
 
 function SideItem({
   icon,

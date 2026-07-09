@@ -26,11 +26,16 @@ export const IPC = {
   micError: 'mic:error',
   micLog: 'mic:log',
   netStatus: 'net:status',
+  // renderer → main: mousedown/mouseup sobre la pill (drag manual del nub)
+  overlayDrag: 'overlay:drag',
   // main → renderer (push)
   evCaption: 'ev:caption',
   evSession: 'ev:session',
   evMicControl: 'ev:mic-control',
   evMeetingDetected: 'ev:meeting-detected',
+  // El main calculó el hover del nub (posición global del cursor) y decide
+  // cuándo expandir/colapsar; el renderer solo pinta.
+  evNubExpanded: 'ev:nub-expanded',
 } as const
 
 // Superficie que el preload expone como window.uyari.
@@ -67,12 +72,23 @@ export interface UyariBridge {
      */
     setOnline(online: boolean): void
   }
+  overlay: {
+    /**
+     * Drag manual de la pill: el renderer reporta mousedown/mouseup y el
+     * main mueve la ventana siguiendo el cursor. (El hover NO pasa por
+     * aquí: lo calcula el main solo, con la posición global del cursor.)
+     */
+    dragStart(): void
+    dragEnd(): void
+  }
   events: {
     onCaption(cb: (segment: CaptionSegment) => void): () => void
     onSession(cb: (session: SessionInfo | null) => void): () => void
     onMicControl(cb: (cmd: MicControlCmd) => void): () => void
     /** Una app de reuniones empezó a usar el micrófono (auto-detección). */
     onMeetingDetected(cb: (info: { label: string }) => void): () => void
+    /** El main decidió expandir/colapsar el nub (hover nativo). */
+    onNubExpanded(cb: (expanded: boolean) => void): () => void
   }
 }
 

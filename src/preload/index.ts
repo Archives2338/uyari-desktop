@@ -37,11 +37,16 @@ const bridge: UyariBridge = {
   net: {
     setOnline: (online) => ipcRenderer.send(IPC.netStatus, online),
   },
+  overlay: {
+    dragStart: () => ipcRenderer.send(IPC.overlayDrag, 'start'),
+    dragEnd: () => ipcRenderer.send(IPC.overlayDrag, 'end'),
+  },
   events: {
     onCaption: subscribe<CaptionSegment>(IPC.evCaption),
     onSession: subscribe<SessionInfo | null>(IPC.evSession),
     onMicControl: subscribe<MicControlCmd>(IPC.evMicControl),
     onMeetingDetected: subscribe<{ label: string }>(IPC.evMeetingDetected),
+    onNubExpanded: subscribe<boolean>(IPC.evNubExpanded),
   },
 }
 

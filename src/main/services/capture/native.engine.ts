@@ -31,6 +31,7 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
   private stdoutRemainder: Buffer = Buffer.alloc(0)
   private stopping = false
   private rendererMicActive = false
+  private micReady = false
   private statusByChannel = new Map<string, CaptureStatus>()
 
   constructor(
@@ -52,11 +53,19 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
     }
   }
 
-  /** Si cualquier canal está reconectando, la sesión está reconectando. */
+  /**
+   * Si cualquier canal está reconectando, la sesión está reconectando.
+   * 'recording' requiere además que el mic nativo ya haya confirmado su
+   * primer frame real — si no, la sesión está 'starting' (ver CaptureStatus).
+   */
   private emitAggregateStatus(detail?: string): void {
     if (this.stopping) return
     const statuses = [...this.statusByChannel.values()]
-    const status: CaptureStatus = statuses.includes('reconnecting') ? 'reconnecting' : 'recording'
+    const status: CaptureStatus = statuses.includes('reconnecting')
+      ? 'reconnecting'
+      : this.micReady || this.rendererMicActive
+        ? 'recording'
+        : 'starting'
     this.emitStatus(status, detail)
   }
 
@@ -91,8 +100,15 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
         const channel = this.stdoutRemainder[0]
         const pcm = this.stdoutRemainder.subarray(1, FRAME_BYTES)
         this.stdoutRemainder = this.stdoutRemainder.subarray(FRAME_BYTES)
-        if (channel === CHANNEL_MIC) this.you.acceptAudio(pcm)
-        else this.them.acceptAudio(pcm)
+        if (channel === CHANNEL_MIC) {
+          this.you.acceptAudio(pcm)
+          if (!this.micReady) {
+            this.micReady = true
+            this.emitAggregateStatus()
+          }
+        } else {
+          this.them.acceptAudio(pcm)
+        }
       }
     })
     helper.stderr.on('data', (data: Buffer) => {

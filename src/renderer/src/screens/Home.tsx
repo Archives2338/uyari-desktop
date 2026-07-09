@@ -80,8 +80,12 @@ export function Home(): React.JSX.Element {
       .finally(() => setMeetingsLoaded(true))
   }, [])
 
-  const active = session?.status === 'recording' || session?.status === 'reconnecting'
+  const active =
+    session?.status === 'recording' ||
+    session?.status === 'reconnecting' ||
+    session?.status === 'starting'
   const reconnecting = session?.status === 'reconnecting'
+  const preparingMic = session?.status === 'starting'
   const showEmptyState = !session && captions.length === 0 && meetingsLoaded && meetings.length === 0
 
   return (
@@ -198,7 +202,11 @@ export function Home(): React.JSX.Element {
                     {active ? session?.title : S.home.firstNoteTitle}
                   </span>
                   <span style={{ font: 'var(--text-xs)', fontWeight: 500, color: 'var(--accent-strong)' }}>
-                    {active ? 'Recording…' : S.home.firstNoteSub}
+                    {active
+                      ? preparingMic
+                        ? S.home.micStarting
+                        : S.home.recording
+                      : S.home.firstNoteSub}
                   </span>
                 </span>
                 {active ? (

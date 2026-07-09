@@ -29,8 +29,11 @@ let CHUNK_SAMPLES = 800 // 50 ms a 16 kHz
 let CHANNEL_MIC: UInt8 = 0
 let CHANNEL_SYSTEM: UInt8 = 1
 
+let bootTime = DispatchTime.now()
+
 func log(_ message: String) {
-    FileHandle.standardError.write(("[helper] " + message + "\n").data(using: .utf8)!)
+    let elapsedMs = (DispatchTime.now().uptimeNanoseconds - bootTime.uptimeNanoseconds) / 1_000_000
+    FileHandle.standardError.write(("[helper +\(elapsedMs)ms] " + message + "\n").data(using: .utf8)!)
 }
 
 func fail(_ message: String) -> Never {

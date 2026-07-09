@@ -64,6 +64,7 @@ export function OverlayPill(): React.JSX.Element {
 
   if (!session) return <></>
   const reconnecting = session.status === 'reconnecting'
+  const preparingMic = session.status === 'starting'
   const openApp = (): void => window.uyari.overlay.focusMain()
 
   return (
@@ -104,7 +105,11 @@ export function OverlayPill(): React.JSX.Element {
         <div className="nub-popover-body">
           {captions.length === 0 ? (
             <p className="nub-empty">
-              {reconnecting ? 'Reconnecting to transcription…' : 'Listening… captions will appear here.'}
+              {reconnecting
+                ? 'Reconnecting to transcription…'
+                : preparingMic
+                  ? 'Starting microphone…'
+                  : 'Listening… captions will appear here.'}
             </p>
           ) : (
             <div className="nub-transcript">

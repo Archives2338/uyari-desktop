@@ -134,6 +134,8 @@ export const S = {
     firstNoteSub: 'Your meeting notes will appear here',
     startCapture: 'Start capture',
     stop: 'Finish & summarize',
+    recording: 'Recording…',
+    micStarting: 'Starting microphone…',
     reconnecting: 'Reconnecting to transcription… audio keeps being captured, nothing is lost.',
     detected: 'seems to be in a meeting.',
     startRecording: 'Start recording',

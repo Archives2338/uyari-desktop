@@ -18,7 +18,11 @@ export interface PermissionsStatus {
   screen: PermissionState
 }
 
-export type CaptureStatus = 'idle' | 'recording' | 'reconnecting' | 'stopping' | 'error'
+// 'starting': la sesión arrancó (STT conectado) pero el mic nativo todavía
+// no confirmó su primer frame real — activar voice processing en macOS
+// toma ~1s; mostrar 'recording' antes de eso hace que se pierdan las
+// primeras palabras del usuario.
+export type CaptureStatus = 'idle' | 'starting' | 'recording' | 'reconnecting' | 'stopping' | 'error'
 
 export interface SessionInfo {
   clientSessionId: string

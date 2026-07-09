@@ -61,7 +61,9 @@ export class MeetingService {
       title: title ?? `Meeting ${new Date().toLocaleString()}`,
       platform: this.platformHint,
       startedAtMs: Date.now(),
-      status: 'recording',
+      // 'recording' llega después, cuando el engine confirma mic real (ver
+      // native.engine.ts) — evita que la UI invite a hablar antes de tiempo.
+      status: 'starting',
     }
 
     this.store.openSession(this.session)

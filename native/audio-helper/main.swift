@@ -71,6 +71,90 @@ final class FrameWriter {
     }
 }
 
+// ============================================================
+// MODO --mic-monitor: auto-detección de reunión (estilo Granola)
+// Sin capturar nada: solo reporta qué apps están USANDO el micrófono
+// (kAudioProcessPropertyIsRunningInput). Una línea JSON por cambio:
+//   {"event":"mic-apps","apps":["us.zoom.xos", ...]}
+// ============================================================
+
+func activeInputBundleIDs() -> Set<String> {
+    var listAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyProcessObjectList,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(
+        AudioObjectID(kAudioObjectSystemObject), &listAddress, 0, nil, &size
+    ) == noErr else { return [] }
+    var processes = [AudioObjectID](
+        repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size
+    )
+    guard AudioObjectGetPropertyData(
+        AudioObjectID(kAudioObjectSystemObject), &listAddress, 0, nil, &size, &processes
+    ) == noErr else { return [] }
+
+    var result: Set<String> = []
+    for process in processes {
+        var runningAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioProcessPropertyIsRunningInput,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var running: UInt32 = 0
+        var runningSize = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(
+            process, &runningAddress, 0, nil, &runningSize, &running
+        ) == noErr, running == 1 else { continue }
+
+        var bundleAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioProcessPropertyBundleID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var bundleID: CFString? = nil
+        var bundleSize = UInt32(MemoryLayout<CFString?>.size)
+        let status = withUnsafeMutablePointer(to: &bundleID) { ptr in
+            AudioObjectGetPropertyData(process, &bundleAddress, 0, nil, &bundleSize, ptr)
+        }
+        if status == noErr, let id = bundleID as String?, !id.isEmpty {
+            result.insert(id)
+        }
+    }
+    return result
+}
+
+func runMicMonitor() -> Never {
+    log("modo mic-monitor: vigilando qué apps usan el micrófono")
+    watchStdinEOF()
+    var last: Set<String> = []
+    while true {
+        let apps = activeInputBundleIDs()
+        if apps != last {
+            last = apps
+            let payload: [String: Any] = ["event": "mic-apps", "apps": Array(apps).sorted()]
+            if let data = try? JSONSerialization.data(withJSONObject: payload) {
+                FileHandle.standardOutput.write(data)
+                FileHandle.standardOutput.write("\n".data(using: .utf8)!)
+            }
+        }
+        Thread.sleep(forTimeInterval: 2)
+    }
+}
+
+/// El padre murió o cerró el pipe → salir (vale para ambos modos).
+func watchStdinEOF() {
+    Thread.detachNewThread {
+        while FileHandle.standardInput.availableData.count > 0 {}
+        exit(0)
+    }
+}
+
+if CommandLine.arguments.contains("--mic-monitor") {
+    runMicMonitor()
+}
+
 let writer = FrameWriter()
 writer.startFlushing()
 

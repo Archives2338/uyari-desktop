@@ -30,6 +30,7 @@ export const IPC = {
   evCaption: 'ev:caption',
   evSession: 'ev:session',
   evMicControl: 'ev:mic-control',
+  evMeetingDetected: 'ev:meeting-detected',
 } as const
 
 // Superficie que el preload expone como window.uyari.
@@ -70,6 +71,8 @@ export interface UyariBridge {
     onCaption(cb: (segment: CaptionSegment) => void): () => void
     onSession(cb: (session: SessionInfo | null) => void): () => void
     onMicControl(cb: (cmd: MicControlCmd) => void): () => void
+    /** Una app de reuniones empezó a usar el micrófono (auto-detección). */
+    onMeetingDetected(cb: (info: { label: string }) => void): () => void
   }
 }
 

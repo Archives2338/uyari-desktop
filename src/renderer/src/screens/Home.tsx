@@ -36,7 +36,8 @@ function groupCaptions(captions: CaptionSegment[]): CaptionGroup[] {
 }
 
 export function Home(): React.JSX.Element {
-  const { session, captions, startCapture, stopCapture } = useApp()
+  const { session, captions, startCapture, stopCapture, detectedMeeting, setDetectedMeeting } =
+    useApp()
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -56,6 +57,22 @@ export function Home(): React.JSX.Element {
       </aside>
 
       <main className="main-pane">
+        {detectedMeeting && !session && (
+          <div className="meeting-banner">
+            <span>
+              <strong>{detectedMeeting}</strong> seems to be in a meeting.
+            </span>
+            <button
+              className="btn btn-accent"
+              onClick={() => void startCapture(`${detectedMeeting} meeting`)}
+            >
+              Start recording
+            </button>
+            <button className="btn btn-ghost" onClick={() => setDetectedMeeting(null)}>
+              Dismiss
+            </button>
+          </div>
+        )}
         <p className="eyebrow">Coming up</p>
         <h1 className="title" style={{ fontSize: 28 }}>
           {active ? (

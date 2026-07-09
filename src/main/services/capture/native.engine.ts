@@ -1,7 +1,6 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process'
-import { join } from 'node:path'
-import { app } from 'electron'
 import type { Readable, Writable } from 'node:stream'
+import { helperPath } from './helper-path'
 import { BaseCaptureEngine } from './engine'
 import { AssemblyAiStream, STREAM_SAMPLE_RATE } from './assemblyai.stream'
 import type { CaptionSegment, CaptureStatus } from '@shared/domain'
@@ -24,12 +23,6 @@ import type { MicControlPort, SttTokenProvider } from './assemblyai.engine'
 const PCM_BYTES = 1600 // 800 samples * 2 = 50 ms
 const FRAME_BYTES = 1 + PCM_BYTES
 const CHANNEL_MIC = 0
-
-function helperPath(): string {
-  return app.isPackaged
-    ? join(process.resourcesPath, 'uyari-audio-helper')
-    : join(app.getAppPath(), 'native/bin/uyari-audio-helper')
-}
 
 export class NativeCaptureEngine extends BaseCaptureEngine {
   private readonly you: AssemblyAiStream

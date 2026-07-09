@@ -41,6 +41,7 @@ const bridge: UyariBridge = {
     onCaption: subscribe<CaptionSegment>(IPC.evCaption),
     onSession: subscribe<SessionInfo | null>(IPC.evSession),
     onMicControl: subscribe<MicControlCmd>(IPC.evMicControl),
+    onMeetingDetected: subscribe<{ label: string }>(IPC.evMeetingDetected),
   },
 }
 

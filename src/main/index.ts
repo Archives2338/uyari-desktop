@@ -1,7 +1,9 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, Notification } from 'electron'
 import { IPC } from '@shared/ipc'
 import { createMainWindow } from './windows/main-window'
+import { createOverlayWindow } from './windows/overlay-window'
 import { registerIpc } from './ipc/register'
+import { MicMonitorService } from './services/mic-monitor.service'
 import { SettingsStore } from './services/settings.store'
 import { ApiClient } from './services/api.client'
 import { MeetingService } from './services/meeting.service'
@@ -39,10 +41,39 @@ if (!app.requestSingleInstanceLock()) {
     // backend caído): subirlas y cerrarlas ahora. Requiere sesión.
     if (settings.token) void meetings.recoverOrphans()
 
+    // Overlay pill: existe solo mientras hay sesión activa.
+    let overlay: BrowserWindow | null = null
     meetings.setListener({
       onCaption: (segment) => broadcast(IPC.evCaption, segment),
-      onSession: (session) => broadcast(IPC.evSession, session),
+      onSession: (session) => {
+        broadcast(IPC.evSession, session)
+        if (session && !overlay) {
+          overlay = createOverlayWindow()
+          overlay.on('closed', () => (overlay = null))
+        } else if (!session && overlay) {
+          overlay.close()
+        }
+      },
     })
+
+    // Auto-detección de reunión: si una app de reuniones enciende el mic y
+    // no estamos grabando, banner en la app + notificación del sistema.
+    const monitor = new MicMonitorService((label) => {
+      if (meetings.state()) return
+      broadcast(IPC.evMeetingDetected, { label })
+      const notification = new Notification({
+        title: `Meeting detected: ${label}`,
+        body: 'Uyari can transcribe it — open the app to start.',
+      })
+      notification.on('click', () => {
+        const [win] = BrowserWindow.getAllWindows()
+        win?.show()
+        win?.focus()
+      })
+      notification.show()
+    })
+    monitor.start()
+    app.on('before-quit', () => monitor.stop())
 
     createMainWindow()
 

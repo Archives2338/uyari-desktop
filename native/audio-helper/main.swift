@@ -341,6 +341,10 @@ log("canal sistema: capturando a \(Int(systemRate)) Hz → 16 kHz")
 
 var micEngine: AVAudioEngine?
 var micPeak: Float = 0 // pico de la ventana actual del watchdog
+// Pausa suave: detenemos la captura SIN soltar el voice processing, para que
+// el resume sea instantáneo (re-armar el VP de Apple cuesta ~1s). Ver
+// pauseCapture()/resumeCapture() y el protocolo de stdin al final.
+var paused = false
 
 @discardableResult
 func startMic(useVoiceProcessing: Bool) -> Bool {
@@ -414,6 +418,13 @@ Thread.detachNewThread {
     var restarts = 0
     while true {
         Thread.sleep(forTimeInterval: 1)
+        // En pausa el mic está detenido a propósito: cero señal es lo esperado,
+        // no un mic mudo. No contar strikes ni intentar rescate.
+        if paused {
+            zeroStrikes = 0
+            micPeak = 0
+            continue
+        }
         let peak = micPeak
         micPeak = 0
         zeroStrikes = peak == 0 ? zeroStrikes + 1 : 0
@@ -423,6 +434,32 @@ Thread.detachNewThread {
         log("mic MUDO (2 s de ceros): rescate SIN AEC — intento \(restarts)")
         startMic(useVoiceProcessing: false)
     }
+}
+
+// --- Pausa suave (resume instantáneo) ---
+// Detiene mic y audio de sistema SIN destruir nada: el motor de voz queda
+// armado (no llamamos setVoiceProcessingEnabled(false)), así el resume no
+// re-paga el arranque de ~1s del VP de Apple. El indicador del micrófono
+// puede quedar encendido durante la pausa (el precio de mantenerlo caliente).
+func pauseCapture() {
+    guard !paused else { return }
+    paused = true
+    micEngine?.pause()
+    if let proc = ioProcID { AudioDeviceStop(aggregateID, proc) }
+    log("captura pausada (VP sigue armado — resume instantáneo)")
+}
+
+func resumeCapture() {
+    guard paused else { return }
+    paused = false
+    if let proc = ioProcID { AudioDeviceStart(aggregateID, proc) }
+    do {
+        try micEngine?.start()
+    } catch {
+        log("no pude reanudar el mic (\(error)) — rescate SIN AEC")
+        startMic(useVoiceProcessing: false)
+    }
+    log("captura reanudada")
 }
 
 // --- Vida atada al padre: EOF en stdin = limpiar y salir ---
@@ -450,5 +487,15 @@ signal(SIGTERM) { _ in exit(0) }
 signal(SIGINT) { _ in exit(0) }
 atexit { cleanup() }
 
-while FileHandle.standardInput.availableData.count > 0 {}
+// Protocolo de stdin (una línea por comando):
+//   "pause"  → pausa suave (mantiene el VP armado)
+//   "resume" → reanuda al instante
+//   EOF      → el padre cerró stdin (murió o pidió cierre) → limpiar y salir
+while let line = readLine(strippingNewline: true) {
+    switch line {
+    case "pause": pauseCapture()
+    case "resume": resumeCapture()
+    default: break
+    }
+}
 exit(0)

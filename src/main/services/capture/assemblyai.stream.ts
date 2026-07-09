@@ -166,6 +166,18 @@ export class AssemblyAiStream extends EventEmitter {
 
       ws.onopen = () => {
         opened = true
+        // Nos pararon/pausaron mientras esta conexión estaba en vuelo (p.ej.
+        // una reconexión en curso al momento de pausar): cerrar este socket en
+        // vez de re-armar timers y dejarlo colgado hasta el idle-timeout.
+        if (this.stopping) {
+          try {
+            ws.close()
+          } catch {
+            // ya está muerta
+          }
+          resolve()
+          return
+        }
         this.epoch += 1
         this.epochStartOffsetMs = Date.now() - this.captureStartMs
         this.reconnectAttempt = 0
@@ -320,9 +332,12 @@ export class AssemblyAiStream extends EventEmitter {
 
   /** Chunk sin voz: pico bajo -40 dBFS (~1% de escala en PCM16). */
   private static isSilent(chunk: Buffer): boolean {
-    const samples = new Int16Array(chunk.buffer, chunk.byteOffset, chunk.byteLength / 2)
-    for (let i = 0; i < samples.length; i++) {
-      const s = samples[i]
+    // readInt16LE tolera cualquier byteOffset. NO usar `new Int16Array(buffer,
+    // byteOffset)`: exige offset múltiplo de 2 y los frames del helper nativo
+    // llegan con offset IMPAR (se les quitó el byte de canal con subarray(1,…))
+    // → RangeError en flushBacklog al reconectar/reanudar.
+    for (let i = 0; i + 1 < chunk.length; i += 2) {
+      const s = chunk.readInt16LE(i)
       if (s > 330 || s < -330) return false
     }
     return true

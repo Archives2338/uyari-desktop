@@ -36,8 +36,9 @@ export class MeetingService {
   // Tramo de captura actual: 0 al arrancar, +1 por cada resume tras pausa.
   // Mantiene únicos los ids de segmento entre tramos (ver CaptureStartOptions).
   private take = 0
-  // Segundos de STT de los tramos ya cerrados (cada engine cuenta solo el
-  // suyo; al pausar lo destruimos, así que acumulamos antes de perderlo).
+  // Segundos de STT acumulados al destruir el engine (solo en el stop final —
+  // el engine sobrevive las pausas y cuenta de forma acumulada; esto queda
+  // como red por si alguna vez se destruye a mitad de sesión).
   private streamedSecondsClosed = 0
 
   constructor(
@@ -109,32 +110,39 @@ export class MeetingService {
     }
 
     this.store.openSession(this.session)
-    return this.launchTake({ take: 0, baseOffsetMs: 0 })
+    this.buildEngine()
+    try {
+      await this.engine!.start({ take: 0, baseOffsetMs: 0 })
+    } catch (err) {
+      return this.failSession(err)
+    }
+    this.startTimers()
+    this.listener?.onSession(this.session)
+    return this.session
   }
 
   /**
-   * Pausa la captura sin cerrar la sesión: libera el helper y los sockets STT
-   * (idénticos recursos que un stop), sube lo pendiente, pero conserva la
-   * sesión viva y retomable. NO genera el resumen — eso es solo del stop.
+   * Pausa la captura sin cerrar la sesión: NO destruye el engine — lo deja
+   * caliente (pauseCapture mantiene el helper vivo con el voice processing
+   * armado; ver native.engine.ts) para que el resume sea instantáneo. Sube lo
+   * pendiente. NO genera el resumen — eso es solo del stop.
    */
   private async _pause(): Promise<SessionInfo | null> {
     if (!this.session || this.session.status === 'paused') return this.session
-    // Marcar 'paused' ANTES de parar el engine: el 'idle' que emite al cerrar
-    // no debe pisar el estado (el guard en el handler de status lo ignora).
+    // Marcar 'paused' ANTES de pausar el engine: cualquier 'idle'/'status'
+    // tardío no debe pisar el estado (el guard en el handler lo ignora).
     this.session = { ...this.session, status: 'paused', statusDetail: undefined }
-    // Esperar a que el helper muera del todo antes de permitir un resume: si
-    // el helper viejo sigue vivo cuando el nuevo arranca, se reproduce el bug
-    // de mic mudo (arbitraje de voice processing de macOS).
-    await this.teardownTake()
+    this.stopTimers()
+    await this.engine?.pauseCapture()
     await this.flush()
     this.listener?.onSession(this.session)
     return this.session
   }
 
   /**
-   * Retoma una sesión pausada en un tramo nuevo: engine fresco (helper +
-   * sockets nuevos), con ids que no colisionan y un offset temporal que ubica
-   * el tramo después del anterior, dejando el hueco natural de la pausa.
+   * Retoma la sesión en un tramo nuevo sobre el MISMO engine caliente: reabre
+   * los canales STT con ids que no colisionan (t<take>) y un offset temporal
+   * que ubica el tramo después del anterior, dejando el hueco de la pausa.
    */
   private async _resume(): Promise<SessionInfo | null> {
     if (!this.session || this.session.status !== 'paused') return this.session
@@ -143,10 +151,42 @@ export class MeetingService {
     // sesión: el silencio de la pausa queda como hueco, sin solaparse.
     const baseOffsetMs = Date.now() - this.session.startedAtMs
     this.session = { ...this.session, status: 'starting', statusDetail: undefined }
-    return this.launchTake({ take: this.take, baseOffsetMs })
+    try {
+      await this.engine?.resumeCapture({ take: this.take, baseOffsetMs })
+    } catch (err) {
+      return this.failSession(err)
+    }
+    this.startTimers()
+    this.listener?.onSession(this.session)
+    return this.session
   }
 
-  /** Construye el engine del tramo y cablea sus eventos a esta sesión. */
+  /** Deja la sesión en error visible (engine no pudo arrancar/reanudar). */
+  private failSession(err: unknown): SessionInfo {
+    const detail = err instanceof Error ? err.message : String(err)
+    this.session = { ...this.session!, status: 'error', statusDetail: detail }
+    this.listener?.onSession(this.session)
+    return this.session
+  }
+
+  private startTimers(): void {
+    if (!this.flushTimer) this.flushTimer = setInterval(() => void this.flush(), FLUSH_INTERVAL_MS)
+    if (this.powerBlockerId === undefined) {
+      this.powerBlockerId = powerSaveBlocker.start('prevent-display-sleep')
+    }
+  }
+
+  private stopTimers(): void {
+    if (this.flushTimer) clearInterval(this.flushTimer)
+    this.flushTimer = null
+    if (this.powerBlockerId !== undefined) {
+      powerSaveBlocker.stop(this.powerBlockerId)
+      this.powerBlockerId = undefined
+    }
+  }
+
+  /** Construye el engine de la sesión y cablea sus eventos. Una vez por sesión
+   *  (el engine se mantiene caliente entre pausas; solo el stop lo destruye). */
   private buildEngine(): void {
     this.engine = this.engineFactory()
     this.engine.on('segment', (segment) => {
@@ -167,48 +207,22 @@ export class MeetingService {
     })
   }
 
-  /** Arranca un tramo (build + engine.start) y prende flush/power blocker. */
-  private async launchTake(opts: { take: number; baseOffsetMs: number }): Promise<SessionInfo> {
-    this.buildEngine()
-    try {
-      await this.engine!.start(opts)
-    } catch (err) {
-      // El engine no pudo arrancar (p.ej. sin ASSEMBLYAI_API_KEY o backend
-      // caído): dejar la sesión en error visible en vez de colgarla.
-      const detail = err instanceof Error ? err.message : String(err)
-      this.session = { ...this.session!, status: 'error', statusDetail: detail }
-      this.listener?.onSession(this.session)
-      return this.session
-    }
-    this.flushTimer = setInterval(() => void this.flush(), FLUSH_INTERVAL_MS)
-    if (this.powerBlockerId === undefined) {
-      this.powerBlockerId = powerSaveBlocker.start('prevent-display-sleep')
-    }
-    this.listener?.onSession(this.session!)
-    return this.session!
-  }
-
   /**
-   * Libera los recursos del tramo actual (helper + sockets + timers) y espera
-   * a que el helper muera del todo — imprescindible antes de arrancar otro
-   * tramo (ver nota sobre el arbitraje de voice processing en pause()).
+   * Destruye el engine de la sesión (helper + sockets + timers) al terminar.
+   * Solo lo llama el stop definitivo: entre pausas el engine se mantiene vivo.
    */
   private async teardownTake(): Promise<void> {
-    if (this.flushTimer) clearInterval(this.flushTimer)
-    this.flushTimer = null
-    if (this.powerBlockerId !== undefined) {
-      powerSaveBlocker.stop(this.powerBlockerId)
-      this.powerBlockerId = undefined
-    }
-    // Soltar la referencia del campo ANTES del await: así, aunque otra
-    // transición corra entre medio (no debería, están serializadas), el
-    // stop() lento del helper opera sobre el engine local y nunca pisa un
-    // engine nuevo. Quitar listeners antes de stop() para que su 'idle' de
-    // cierre no llegue al handler.
+    this.stopTimers()
+    // Soltar la referencia del campo ANTES del await: aunque otra transición
+    // corra entre medio (no debería, están serializadas), el stop() lento del
+    // helper opera sobre el engine local y nunca pisa un engine nuevo. Quitar
+    // listeners antes de stop() para que su 'idle' de cierre no llegue al
+    // handler.
     const engine = this.engine
     this.engine = null
-    // Guardar los segundos de STT antes de perder el engine (cada engine solo
-    // cuenta los suyos): así el consumo del plan suma todos los tramos.
+    // Guardar los segundos de STT antes de perder el engine: así el consumo
+    // del plan (todos los tramos, contados de forma acumulada por el engine
+    // que sobrevive las pausas) queda registrado.
     this.streamedSecondsClosed += engine?.streamedSeconds() ?? 0
     engine?.removeAllListeners()
     await engine?.stop()

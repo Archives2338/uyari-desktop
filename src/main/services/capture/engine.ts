@@ -25,6 +25,14 @@ export interface CaptureEngine {
   /** Detiene y libera recursos. Idempotente. */
   stop(): Promise<void>
   /**
+   * Pausa la captura manteniendo el pipeline CALIENTE para que el resume sea
+   * instantáneo (motor nativo: helper vivo con voice processing ya armado, se
+   * ahorra el ~1s de re-armarlo). Los motores que no puedan mantenerse
+   * calientes caen a un stop/start normal (default en BaseCaptureEngine).
+   */
+  pauseCapture(): Promise<void>
+  resumeCapture(opts?: CaptureStartOptions): Promise<void>
+  /**
    * Segundos de audio transmitidos al STT en toda la sesión (suma de canales
    * en el motor nativo). Los motores sin costo de STT (mock) devuelven 0.
    */
@@ -37,6 +45,17 @@ export interface CaptureEngine {
 export abstract class BaseCaptureEngine extends EventEmitter implements CaptureEngine {
   abstract start(opts?: CaptureStartOptions): Promise<void>
   abstract stop(): Promise<void>
+
+  /**
+   * Default: pausar = parar, reanudar = arrancar de nuevo. Correcto pero NO
+   * instantáneo. El motor nativo lo sobrescribe para mantenerse caliente.
+   */
+  async pauseCapture(): Promise<void> {
+    await this.stop()
+  }
+  async resumeCapture(opts?: CaptureStartOptions): Promise<void> {
+    await this.start(opts)
+  }
 
   /** Por defecto sin consumo de STT; los motores con STT lo sobrescriben. */
   streamedSeconds(): number {

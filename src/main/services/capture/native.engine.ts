@@ -30,6 +30,10 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
   private helper: ChildProcessByStdio<Writable, Readable, Readable> | null = null
   private stdoutRemainder: Buffer = Buffer.alloc(0)
   private stopping = false
+  // Pausa suave en curso: el helper sigue vivo pero con la captura detenida.
+  // Distingue una muerte del helper "durante la pausa" (no hacer fallback al
+  // mic del renderer) de una caída real durante la captura.
+  private paused = false
   private rendererMicActive = false
   private micReady = false
   private statusByChannel = new Map<string, CaptureStatus>()
@@ -115,15 +119,72 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
     helper.stderr.on('data', (data: Buffer) => {
       process.stderr.write(data)
     })
+    // Escribir un comando a un helper ya muerto emite 'error' (EPIPE) de forma
+    // ASÍNCRONA — el try/catch alrededor del write NO lo atrapa; sin este
+    // listener tumbaría el proceso main. El 'exit'/'error' del hijo hace el
+    // resto (fallback o respawn).
+    helper.stdin.on('error', (err) => console.warn('[native] stdin del helper:', err.message))
     helper.on('error', (err) => this.onHelperGone(err.message))
     helper.on('exit', (code) => {
       if (!this.stopping) this.onHelperGone(`helper terminó con código ${code}`)
     })
   }
 
+  /**
+   * Pausa CALIENTE: el helper sigue vivo con el voice processing armado (solo
+   * pausa sus motores de audio, comando "pause" por stdin), y paramos los
+   * canales STT (dejamos de transcribir/consumir cuota). El resume vuelve en
+   * ~0.2s en vez de re-pagar el ~1s de re-armar el VP de Apple.
+   */
+  async pauseCapture(): Promise<void> {
+    this.paused = true
+    try {
+      this.helper?.stdin.write('pause\n')
+    } catch {
+      // El EPIPE async lo maneja el listener de stdin; el 'exit' del helper
+      // solo anula la referencia (sin fallback) porque estamos pausados.
+    }
+    this.micReady = false
+    await Promise.all([this.you.stop(), this.them.stop()])
+  }
+
+  /** Reanuda: reabre los canales STT (tramo nuevo) y despierta al helper. */
+  async resumeCapture(opts?: CaptureStartOptions): Promise<void> {
+    this.stopping = false
+    this.paused = false
+    this.micReady = false
+    // start() marca el stream como receptivo (stopping=false) de forma
+    // SÍNCRONA antes de conectar, así que despertamos al helper en paralelo:
+    // sus frames se encolan en el backlog del stream hasta que el WS abre (sin
+    // pérdida) y el mic vuelve a ~0.2s en vez de esperar la reconexión STT.
+    const youStarted = this.you.start(opts)
+    const themStarted = this.them.start(opts)
+    if (this.helper) {
+      try {
+        this.helper.stdin.write('resume\n')
+      } catch {
+        // idem: el listener de stdin maneja el EPIPE.
+      }
+    } else {
+      // El helper murió durante la pausa: arrancar uno nuevo (paga el ~1s del
+      // VP, pero solo en este caso de recuperación, no en el resume normal).
+      this.spawnHelper()
+    }
+    await youStarted
+    try {
+      await themStarted
+    } catch (err) {
+      console.error('[native] canal de sistema no disponible al reanudar:', err)
+    }
+  }
+
   private onHelperGone(reason: string): void {
     console.error('[native] helper de audio caído:', reason)
     this.helper = null
+    // Si murió estando pausado, NO abrir el mic del renderer (la sesión está
+    // en pausa — encender el mic con la UI en "pausa" sería un bug de
+    // confianza). El resume respawnea un helper limpio.
+    if (this.paused) return
     void this.them.stop()
     this.fallbackToRendererMic(
       'System audio stopped — check System Audio Recording permission. Your microphone keeps working.',

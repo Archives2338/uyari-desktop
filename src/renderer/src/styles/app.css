@@ -1,15 +1,6 @@
-/* Layout base de la app de escritorio. Tema oscuro por defecto usando los
-   tokens del design system (tokens.css se importa antes que este archivo). */
-
-:root {
-  /* Superficies dark derivadas de --ink para la ventana de escritorio */
-  --app-bg: #1b1926;
-  --app-surface: #232030;
-  --app-surface-raised: #2b2839;
-  --app-border: #37334a;
-  --app-text: #f2f1f6;
-  --app-text-muted: #a29ec0;
-}
+/* Layout base de la app de escritorio. El tema (light papel / DESK_DARK)
+   lo aplica ThemeRoot como overrides de variables CSS — aquí solo se leen
+   tokens, nunca colores fijos de tema (ver src/theme/theme.tsx). */
 
 html,
 body,
@@ -19,8 +10,6 @@ body,
 }
 
 body {
-  background: var(--app-bg);
-  color: var(--app-text);
   font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   user-select: none;
@@ -37,171 +26,13 @@ body {
   z-index: 10;
 }
 
-.screen {
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* Los controles dentro de la franja superior deben seguir siendo clicables */
+.drag-region ~ * button,
+.drag-region ~ * input {
+  -webkit-app-region: no-drag;
 }
 
-.card {
-  background: var(--app-surface);
-  border: 1px solid var(--app-border);
-  border-radius: 16px;
-  padding: 48px;
-  width: 560px;
-  max-width: calc(100vw - 96px);
-}
-
-.eyebrow {
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--app-text-muted);
-  margin: 0 0 16px;
-}
-
-.title {
-  font-family: Fraunces, Georgia, serif;
-  font-weight: 500;
-  font-size: 32px;
-  line-height: 1.2;
-  margin: 0 0 12px;
-}
-
-.subtitle {
-  color: var(--app-text-muted);
-  font-size: 15px;
-  margin: 0 0 32px;
-}
-
-.input {
-  width: 100%;
-  box-sizing: border-box;
-  background: var(--app-bg);
-  border: 1px solid var(--app-border);
-  border-radius: 10px;
-  color: var(--app-text);
-  font: inherit;
-  font-size: 15px;
-  padding: 14px 16px;
-  outline: none;
-}
-
-.input:focus {
-  border-color: var(--violet);
-}
-
-.btn {
-  border: none;
-  border-radius: 999px;
-  font: inherit;
-  font-weight: 600;
-  font-size: 14px;
-  padding: 12px 24px;
-  cursor: pointer;
-  background: var(--paper);
-  color: var(--ink);
-}
-
-.btn:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.btn-ghost {
-  background: transparent;
-  color: var(--app-text-muted);
-  border: 1px solid var(--app-border);
-}
-
-.btn-accent {
-  background: var(--violet);
-  color: #fff;
-}
-
-.footer-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 40px;
-}
-
-/* Permisos */
-.perm-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 16px;
-  border: 1px solid var(--app-border);
-  border-radius: 12px;
-  margin-bottom: 12px;
-}
-
-.perm-row .grow {
-  flex: 1;
-}
-
-.perm-name {
-  font-weight: 600;
-  font-size: 15px;
-  margin: 0 0 2px;
-}
-
-.perm-why {
-  color: var(--app-text-muted);
-  font-size: 13px;
-  margin: 0;
-}
-
-.perm-state-granted {
-  color: var(--mint);
-  font-weight: 600;
-  font-size: 13px;
-}
-
-/* Home */
-.home {
-  display: flex;
-  height: 100%;
-}
-
-.sidebar {
-  width: 240px;
-  background: var(--app-surface);
-  border-right: 1px solid var(--app-border);
-  padding: 56px 12px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.sidebar-item {
-  padding: 8px 12px;
-  border-radius: 8px;
-  font-size: 14px;
-  color: var(--app-text-muted);
-  cursor: default;
-}
-
-.sidebar-item.active {
-  background: var(--app-surface-raised);
-  color: var(--app-text);
-}
-
-.sidebar-footer {
-  margin-top: auto;
-  font-size: 12px;
-  color: var(--app-text-muted);
-  padding: 8px 12px;
-}
-
-.main-pane {
-  flex: 1;
-  padding: 64px 48px 32px;
-  overflow-y: auto;
-}
-
+/* Transcript en vivo */
 .transcript {
   display: flex;
   flex-direction: column;
@@ -210,16 +41,16 @@ body {
 }
 
 .caption-line {
-  background: var(--app-surface);
-  border: 1px solid var(--app-border);
-  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
   padding: 12px 16px;
-  font-size: 14px;
-  line-height: 1.5;
+  font: var(--text-sm);
+  color: var(--text-body);
 }
 
 .caption-speaker {
-  color: var(--violet);
+  color: var(--accent-strong);
   font-weight: 600;
   margin-right: 8px;
 }
@@ -230,7 +61,8 @@ body {
   height: 8px;
   border-radius: 50%;
   background: #e5484d;
-  margin-right: 8px;
+  margin-right: 10px;
+  vertical-align: middle;
   animation: pulse 1.4s infinite;
 }
 
@@ -240,28 +72,25 @@ body {
   }
 }
 
-.logo-mark {
-  width: 64px;
-  height: 64px;
-  border-radius: 16px;
-  margin-bottom: 24px;
+.reconnect-note {
+  color: #b8860b;
+  font: var(--text-xs);
+  font-weight: 500;
+  margin: 0 0 12px;
 }
 
-/* Banner de reunión detectada (mic-monitor) */
-.meeting-banner {
+[data-theme='dark'] .reconnect-note {
+  color: #f5c451;
+}
+
+.error-text {
+  color: #e5484d;
+  font: var(--text-xs);
+  font-weight: 500;
+  margin: 0 0 12px;
   display: flex;
   align-items: center;
-  gap: 12px;
-  background: var(--app-surface);
-  border: 1px solid var(--violet);
-  border-radius: 12px;
-  padding: 12px 16px;
-  margin-bottom: 24px;
-  font-size: 14px;
-}
-
-.meeting-banner span {
-  flex: 1;
+  gap: 8px;
 }
 
 /* Overlay pill (ventana flotante transparente) */
@@ -279,9 +108,10 @@ body {
   height: 44px;
   margin: 4px;
   padding: 0 8px 0 14px;
-  background: rgba(27, 25, 38, 0.92);
-  border: 1px solid var(--app-border);
-  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-float);
   -webkit-app-region: drag;
   user-select: none;
 }
@@ -301,15 +131,14 @@ body {
 
 .pill-time {
   font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--app-text);
+  font: var(--label-sm);
+  color: var(--text-heading);
 }
 
 .pill-label {
   flex: 1;
-  font-size: 12px;
-  color: var(--app-text-muted);
+  font: var(--text-xs);
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
 }
@@ -320,25 +149,13 @@ body {
   border-radius: 50%;
   width: 30px;
   height: 30px;
-  background: var(--app-surface-raised);
+  background: var(--surface-sunken);
   color: #e5484d;
   font-size: 11px;
   cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
 }
 
 .pill-stop:hover {
-  background: #3a3650;
-}
-
-.reconnect-note {
-  color: #f5c451;
-  font-size: 13px;
-  margin: 0 0 12px;
-}
-
-.error-text {
-  color: #ff8b8b;
-  font-size: 13px;
-  margin-top: 12px;
-  min-height: 18px;
+  background: var(--violet-soft);
 }

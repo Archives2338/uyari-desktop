@@ -1,19 +1,26 @@
 import { useEffect, useState } from 'react'
 import { useApp } from '@renderer/store'
 import { startMic, stopMic } from '@renderer/lib/mic'
-import { Welcome } from '@renderer/screens/Welcome'
-import { Permissions } from '@renderer/screens/Permissions'
+import { ThemeRoot } from '@renderer/theme/theme'
+import { OnboardingFlow } from '@renderer/onboarding/Flow'
+import { loadFlow } from '@renderer/onboarding/state'
 import { Home } from '@renderer/screens/Home'
 import { OverlayPill } from '@renderer/screens/OverlayPill'
 
 const IS_OVERLAY = new URLSearchParams(window.location.search).get('view') === 'overlay'
 
-// Router mínimo por estado: login → permisos → home.
-// Cuando entren las pantallas de Claude Design, cada paso del wizard se
-// agrega aquí sin tocar main ni preload.
+// Router por estado: onboarding (login + permisos incluidos) → Home.
+// El cableado de eventos IPC es idéntico al de antes — la migración de UI
+// no toca lógica: mismo store, mismos canales, mismo mic control.
 
 export function App(): React.JSX.Element {
-  if (IS_OVERLAY) return <OverlayPill />
+  if (IS_OVERLAY) {
+    return (
+      <ThemeRoot transparent>
+        <OverlayPill />
+      </ThemeRoot>
+    )
+  }
   return <MainApp />
 }
 
@@ -21,7 +28,7 @@ function MainApp(): React.JSX.Element {
   const { auth, refreshAuth, refreshPermissions, pushCaption, setSession, setDetectedMeeting } =
     useApp()
   const [ready, setReady] = useState(false)
-  const [permissionsDone, setPermissionsDone] = useState(false)
+  const [onboarded, setOnboarded] = useState(() => loadFlow().done)
 
   useEffect(() => {
     void Promise.all([refreshAuth(), refreshPermissions()]).then(() => setReady(true))
@@ -56,21 +63,20 @@ function MainApp(): React.JSX.Element {
     }
   }, [refreshAuth, refreshPermissions, pushCaption, setSession, setDetectedMeeting])
 
-  if (!ready) return <div className="screen" />
-
-  let screen: React.JSX.Element
-  if (!auth.loggedIn) {
-    screen = <Welcome />
-  } else if (!permissionsDone) {
-    screen = <Permissions onDone={() => setPermissionsDone(true)} />
-  } else {
-    screen = <Home />
-  }
+  const showOnboarding = !auth.loggedIn || !onboarded
 
   return (
-    <>
+    <ThemeRoot>
       <div className="drag-region" />
-      {screen}
-    </>
+      {!ready ? (
+        <div style={{ height: '100%' }} />
+      ) : showOnboarding ? (
+        <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <OnboardingFlow loggedIn={auth.loggedIn} onDone={() => setOnboarded(true)} />
+        </div>
+      ) : (
+        <Home />
+      )}
+    </ThemeRoot>
   )
 }

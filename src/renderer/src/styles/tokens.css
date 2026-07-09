@@ -1,8 +1,21 @@
-/* Uyari webfonts.
-   Brand spec asks for Gilroy (body) — not freely licensed, so we ship the
-   brief's own named fallback, Plus Jakarta Sans. Headline serif: Fraunces
-   (first choice named in the brand brief). */
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+/* Uyari webfonts, EMPAQUETADAS (app de escritorio: sin red no hay Google
+   Fonts; el README del handoff pide bundlear los archivos).
+   Brand spec pide Gilroy (body) — sin licencia libre, se usa el fallback
+   nombrado por el brief, Plus Jakarta Sans. Serif de titulares: Fraunces. */
+@font-face {
+  font-family: 'Fraunces';
+  src: url('../assets/fonts/Fraunces-Variable.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  src: url('../assets/fonts/PlusJakartaSans-Variable.woff2') format('woff2');
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+}
 :root {
   /* ── Base palette ── */
   --paper: #FCFCFB;            /* dominant background — warm near-white */

@@ -22,6 +22,7 @@ import Foundation
 import CoreAudio
 import AudioToolbox
 import AVFoundation
+import CoreGraphics
 
 let TARGET_RATE = 16_000.0
 let CHUNK_SAMPLES = 800 // 50 ms a 16 kHz
@@ -149,6 +150,33 @@ func watchStdinEOF() {
         while FileHandle.standardInput.availableData.count > 0 {}
         exit(0)
     }
+}
+
+// ============================================================
+// MODO --check-permissions: estado REAL del permiso que de verdad usamos.
+//
+// OJO: NO es "Screen Recording" (captura de pantalla). Nuestro canal de
+// audio del sistema es un Core Audio process tap (macOS 14.4+), que usa el
+// permiso "System Audio Recording" — la sección "Sólo grabación de audio
+// del sistema" de Ajustes, DISTINTA de captura de pantalla. Ahí es donde
+// aparece Granola. CGPreflightScreenCaptureAccess miraba el permiso
+// equivocado.
+//
+// Fuente de verdad = intentar crear el tap: si el permiso no está, falla.
+// Como este helper es un proceso recién lanzado, no arrastra el cache de
+// TCC por-proceso que deja a Electron pegado en "denied" (electron#36722).
+// Una línea JSON por stdout: {"audio":true|false}
+// ============================================================
+
+if CommandLine.arguments.contains("--check-permissions") {
+    let probeDescription = CATapDescription(monoGlobalTapButExcludeProcesses: [])
+    probeDescription.isPrivate = true
+    var probeTap = AudioObjectID(kAudioObjectUnknown)
+    let probeStatus = AudioHardwareCreateProcessTap(probeDescription, &probeTap)
+    let granted = probeStatus == noErr
+    if granted { AudioHardwareDestroyProcessTap(probeTap) }
+    print("{\"audio\":\(granted)}")
+    exit(0)
 }
 
 if CommandLine.arguments.contains("--mic-monitor") {

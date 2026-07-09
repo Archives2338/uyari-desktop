@@ -4,6 +4,13 @@ import { join, dirname } from 'node:path'
 
 // Store JSON mínimo en userData. El JWT se guarda cifrado con safeStorage
 // (Keychain en macOS); el resto de settings va en claro.
+//
+// En DEV safeStorage se omite a propósito: el binario Electron de
+// node_modules no tiene firma estable, así que el Keychain no puede
+// persistir la confianza y pide la clave de macOS EN CADA ARRANQUE. En la
+// app empaquetada y firmada (Developer ID) el prompt sale una sola vez.
+// El token de dev es un JWT contra localhost — guardarlo en claro ahí no
+// arriesga nada.
 
 interface Settings {
   email?: string
@@ -37,9 +44,13 @@ export class SettingsStore {
     return this.cache.email
   }
 
+  private useKeychain(): boolean {
+    return app.isPackaged && safeStorage.isEncryptionAvailable()
+  }
+
   setSession(email: string, token: string): void {
     this.cache.email = email
-    this.cache.tokenEncrypted = safeStorage.isEncryptionAvailable()
+    this.cache.tokenEncrypted = this.useKeychain()
       ? safeStorage.encryptString(token).toString('base64')
       : Buffer.from(token, 'utf8').toString('base64')
     this.persist()
@@ -49,10 +60,14 @@ export class SettingsStore {
     const raw = this.cache.tokenEncrypted
     if (!raw) return undefined
     const buf = Buffer.from(raw, 'base64')
+    // El formato se detecta por contenido, no por modo: safeStorage de
+    // Chromium antepone el magic "v10"/"v11" al ciphertext; un JWT en
+    // claro jamás empieza así. Así una sesión guardada cifrada antes de
+    // este cambio sigue siendo legible en dev (un último prompt) y el
+    // próximo login la reescribe en el formato del modo actual.
+    const encrypted = buf.subarray(0, 3).toString('latin1').startsWith('v1')
     try {
-      return safeStorage.isEncryptionAvailable()
-        ? safeStorage.decryptString(buf)
-        : buf.toString('utf8')
+      return encrypted ? safeStorage.decryptString(buf) : buf.toString('utf8')
     } catch {
       return undefined
     }

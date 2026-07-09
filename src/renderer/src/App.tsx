@@ -5,9 +5,14 @@ import { ThemeRoot } from '@renderer/theme/theme'
 import { OnboardingFlow } from '@renderer/onboarding/Flow'
 import { loadFlow } from '@renderer/onboarding/state'
 import { Home } from '@renderer/screens/Home'
+import { MeetingDetail } from '@renderer/screens/MeetingDetail'
 import { OverlayPill } from '@renderer/screens/OverlayPill'
 
-const IS_OVERLAY = new URLSearchParams(window.location.search).get('view') === 'overlay'
+const QUERY = new URLSearchParams(window.location.search)
+const IS_OVERLAY = QUERY.get('view') === 'overlay'
+// Dev: UYARI_ONBOARDING=1 npm run dev → el main agrega ?onboarding=1 y el
+// wizard se muestra desde el inicio aunque ya esté completado.
+const FORCE_ONBOARDING = QUERY.get('onboarding') === '1'
 
 // Router por estado: onboarding (login + permisos incluidos) → Home.
 // El cableado de eventos IPC es idéntico al de antes — la migración de UI
@@ -25,10 +30,17 @@ export function App(): React.JSX.Element {
 }
 
 function MainApp(): React.JSX.Element {
-  const { auth, refreshAuth, refreshPermissions, pushCaption, setSession, setDetectedMeeting } =
-    useApp()
+  const {
+    auth,
+    refreshAuth,
+    refreshPermissions,
+    pushCaption,
+    setSession,
+    setDetectedMeeting,
+    openMeetingId,
+  } = useApp()
   const [ready, setReady] = useState(false)
-  const [onboarded, setOnboarded] = useState(() => loadFlow().done)
+  const [onboarded, setOnboarded] = useState(() => !FORCE_ONBOARDING && loadFlow().done)
 
   useEffect(() => {
     void Promise.all([refreshAuth(), refreshPermissions()]).then(() => setReady(true))
@@ -72,8 +84,14 @@ function MainApp(): React.JSX.Element {
         <div style={{ height: '100%' }} />
       ) : showOnboarding ? (
         <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-          <OnboardingFlow loggedIn={auth.loggedIn} onDone={() => setOnboarded(true)} />
+          <OnboardingFlow
+            loggedIn={auth.loggedIn}
+            startFresh={FORCE_ONBOARDING}
+            onDone={() => setOnboarded(true)}
+          />
         </div>
+      ) : openMeetingId ? (
+        <MeetingDetail key={openMeetingId} clientSessionId={openMeetingId} />
       ) : (
         <Home />
       )}

@@ -1,170 +1,88 @@
-import { useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '@renderer/store'
 import { Button } from '@renderer/ui/Button'
-import { dIcon, useHover } from '@renderer/ui/chrome'
-import { S, WS_COLORS } from '@renderer/strings'
+import { dIcon } from '@renderer/ui/chrome'
+import { S, PLATFORM_LABEL } from '@renderer/strings'
 import { loadFlow } from '@renderer/onboarding/state'
 import { groupCaptions } from '@renderer/lib/captions'
+import { formatRelativeDate } from '@renderer/lib/dates'
+import { Sidebar } from '@renderer/components/Sidebar'
+import type { MeetingListItem, SummaryStatus } from '@shared/domain'
 
 // Home = paso 9 del kit (sidebar + "Coming up") FUSIONADO con la lógica
 // real que ya existía: banner de reunión detectada, start/stop, estados de
 // reconexión y transcript en vivo. Mismo store, mismos eventos IPC.
 
-function SideItem({
-  icon,
-  label,
-  active,
-  indent,
+const STATUS_LABEL: Record<SummaryStatus, string> = {
+  PENDING: 'Summarizing…',
+  PROCESSING: 'Summarizing…',
+  DONE: 'Summarized',
+  FAILED: 'Summary failed',
+}
+
+function MeetingRow({
+  item,
+  onOpen,
 }: {
-  icon: ReactNode
-  label: string
-  active?: boolean
-  indent?: boolean
+  item: MeetingListItem
+  onOpen: () => void
 }): React.JSX.Element {
-  const [hover, hoverProps] = useHover()
   return (
-    <div
-      {...hoverProps}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 9,
-        padding: '7px 10px',
-        marginLeft: indent ? 14 : 0,
-        borderRadius: 'var(--radius-sm)',
-        cursor: 'pointer',
-        background: active ? 'var(--surface-sunken)' : hover ? 'var(--violet-wash)' : 'transparent',
-        font: 'var(--text-sm)',
-        fontWeight: 500,
-        color: active ? 'var(--text-heading)' : 'var(--ink-2)',
-      }}
-    >
-      <span style={{ display: 'inline-flex', color: active ? 'var(--accent-strong)' : 'var(--ink-3)' }}>
-        {icon}
+    <div className="home-meeting-row" onClick={onOpen}>
+      <span className="home-meeting-icon">
+        {dIcon(['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6'])}
       </span>
-      {label}
+      <span className="home-meeting-info">
+        <span className="home-meeting-title">{item.title || 'Untitled meeting'}</span>
+        <span className="home-meeting-meta">
+          {PLATFORM_LABEL[item.platform]} · {formatRelativeDate(item.startedAt)}
+        </span>
+      </span>
+      {item.summaryStatus && (
+        <span className={`detail-badge detail-badge-${item.summaryStatus.toLowerCase()}`}>
+          {STATUS_LABEL[item.summaryStatus]}
+        </span>
+      )}
     </div>
   )
 }
 
-function Sidebar({ workspace, wsColorId }: { workspace: string; wsColorId: string }): React.JSX.Element {
-  const initial = (workspace || 'U').trim().charAt(0).toUpperCase()
-  const ws = WS_COLORS.find((c) => c.id === wsColorId) ?? WS_COLORS[0]
-  const i = (d: string | string[]): ReactNode => dIcon(d, 1.6)
-  return (
-    <aside
-      style={{
-        width: 230,
-        flexShrink: 0,
-        borderRight: '1px solid var(--border)',
-        display: 'flex',
-        flexDirection: 'column',
-        padding: '48px 12px 14px',
-        boxSizing: 'border-box',
-        gap: 4,
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          background: 'var(--surface-sunken)',
-          borderRadius: 'var(--radius-sm)',
-          padding: '8px 12px',
-          marginBottom: 10,
-          font: 'var(--text-sm)',
-          color: 'var(--ink-4)',
-        }}
-      >
-        {i(['M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14z', 'm21 21-4.35-4.35'])}
-        {S.home.search}
-        <span style={{ marginLeft: 'auto', font: 'var(--text-xs)', color: 'var(--ink-4)' }}>⌘K</span>
-      </div>
-      <SideItem icon={i('M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5')} label={S.home.nav.home} active />
-      <SideItem
-        icon={i([
-          'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2',
-          'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
-          'M23 21v-2a4 4 0 0 0-3-3.87',
-          'M16 3.13a4 4 0 0 1 0 7.75',
-        ])}
-        label={S.home.nav.shared}
-      />
-      <SideItem icon={i('M8 12a8 7 0 1 1 4 6.2L7 20l.8-3.4A8 7 0 0 1 8 12z')} label={S.home.nav.ask} />
-      <div
-        style={{
-          font: 'var(--eyebrow)',
-          letterSpacing: 'var(--eyebrow-tracking)',
-          color: 'var(--ink-4)',
-          padding: '16px 10px 6px',
-        }}
-      >
-        {S.home.spaces}
-      </div>
-      <SideItem icon={i(['M5 11h14v10H5z', 'M8 11V7a4 4 0 0 1 8 0v4'])} label={S.home.myNotes} />
-      <SideItem
-        icon={i([
-          'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
-          'M12 11v6M9 14h6',
-        ])}
-        label={S.home.addFolder}
-        indent
-      />
-      <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '4px 6px', cursor: 'pointer' }}>
-          <span
-            style={{
-              width: 26,
-              height: 26,
-              borderRadius: 7,
-              background: ws.bg,
-              color: ws.fg,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              font: 'var(--label-sm)',
-              fontSize: 13,
-            }}
-          >
-            {initial}
-          </span>
-          <span style={{ font: 'var(--label-sm)', fontSize: 14, color: 'var(--text-heading)' }}>
-            {workspace || 'Uyari'}
-          </span>
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="var(--ink-4)"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            style={{ marginLeft: 'auto' }}
-          >
-            <path d="m7 15 5 5 5-5M7 9l5-5 5 5" />
-          </svg>
-        </div>
-      </div>
-    </aside>
-  )
-}
-
 export function Home(): React.JSX.Element {
-  const { session, captions, startCapture, stopCapture, detectedMeeting, setDetectedMeeting } =
-    useApp()
+  const {
+    session,
+    captions,
+    startCapture,
+    stopCapture,
+    detectedMeeting,
+    setDetectedMeeting,
+    openMeeting,
+  } = useApp()
   const bottomRef = useRef<HTMLDivElement>(null)
   const flow = useMemo(loadFlow, [])
   const today = new Date()
+
+  const [meetings, setMeetings] = useState<MeetingListItem[]>([])
+  const [meetingsLoaded, setMeetingsLoaded] = useState(false)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [captions.length])
 
+  useEffect(() => {
+    // v1: solo la primera página (más recientes primero, hasta 20). Sin
+    // "load more" todavía — se agrega cuando alguien de verdad la necesite.
+    void window.uyari.meetings
+      .list()
+      .then((page) => setMeetings(page.items))
+      .catch(() => {
+        // Backend caído o sin sesión: el Home sigue usable sin historial.
+      })
+      .finally(() => setMeetingsLoaded(true))
+  }, [])
+
   const active = session?.status === 'recording' || session?.status === 'reconnecting'
   const reconnecting = session?.status === 'reconnecting'
-  const showEmptyState = !session && captions.length === 0
+  const showEmptyState = !session && captions.length === 0 && meetingsLoaded && meetings.length === 0
 
   return (
     <div style={{ flex: 1, display: 'flex', minHeight: 0, height: '100%' }}>
@@ -324,6 +242,14 @@ export function Home(): React.JSX.Element {
               )}
             </div>
           </div>
+
+          {meetings.length > 0 && (
+            <div className="home-meetings">
+              {meetings.map((item) => (
+                <MeetingRow key={item.id} item={item} onOpen={() => openMeeting(item.clientSessionId)} />
+              ))}
+            </div>
+          )}
 
           <div className="transcript">
             {groupCaptions(captions).map((g) => (

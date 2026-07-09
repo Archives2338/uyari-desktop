@@ -11,6 +11,8 @@ interface AppStore {
   captions: CaptionSegment[]
   /** Reunión detectada por el mic-monitor ("Zoom", "a meeting in Chrome"…). */
   detectedMeeting: string | null
+  /** clientSessionId abierto en MeetingDetail; null = se ve el Home. */
+  openMeetingId: string | null
 
   refreshAuth(): Promise<void>
   refreshPermissions(): Promise<void>
@@ -20,14 +22,17 @@ interface AppStore {
   pushCaption(segment: CaptionSegment): void
   setSession(session: SessionInfo | null): void
   setDetectedMeeting(label: string | null): void
+  openMeeting(clientSessionId: string): void
+  closeMeeting(): void
 }
 
-export const useApp = create<AppStore>((set) => ({
+export const useApp = create<AppStore>((set, get) => ({
   auth: { loggedIn: false },
   permissions: { microphone: 'unknown', screen: 'unknown' },
   session: null,
   captions: [],
   detectedMeeting: null,
+  openMeetingId: null,
 
   refreshAuth: async () => set({ auth: await window.uyari.auth.state() }),
   refreshPermissions: async () => set({ permissions: await window.uyari.permissions.status() }),
@@ -40,8 +45,14 @@ export const useApp = create<AppStore>((set) => ({
   },
 
   stopCapture: async () => {
+    // Guardar el id antes de limpiar la sesión: al terminar, saltamos
+    // directo al detalle (resumen + action items) — el "momento wow".
+    // captions también se limpia: si no, al volver al Home más tarde
+    // (botón "Home" del detalle) se vería el transcript de la sesión
+    // vieja pegado en la vista en vivo.
+    const clientSessionId = get().session?.clientSessionId
     await window.uyari.capture.stop()
-    set({ session: null })
+    set({ session: null, captions: [], openMeetingId: clientSessionId ?? null })
   },
 
   pushCaption: (segment) =>
@@ -59,4 +70,7 @@ export const useApp = create<AppStore>((set) => ({
   setSession: (session) => set({ session }),
 
   setDetectedMeeting: (label) => set({ detectedMeeting: label }),
+
+  openMeeting: (clientSessionId) => set({ openMeetingId: clientSessionId }),
+  closeMeeting: () => set({ openMeetingId: null }),
 }))

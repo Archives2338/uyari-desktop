@@ -1,4 +1,9 @@
-import type { CaptionSegment, Platform } from '@shared/domain'
+import type {
+  CaptionSegment,
+  MeetingDetailData,
+  MeetingListPage,
+  Platform,
+} from '@shared/domain'
 import type { SettingsStore } from './settings.store'
 
 // Cliente HTTP del backend de Uyari. Mismo protocolo que usa la extensión:
@@ -91,5 +96,19 @@ export class ApiClient {
       method: 'POST',
       body: JSON.stringify({ question }),
     })
+  }
+
+  /** Listado paginado por cursor (más reciente primero). */
+  listMeetings(params?: { cursor?: string; limit?: number }): Promise<MeetingListPage> {
+    const qs = new URLSearchParams()
+    if (params?.cursor) qs.set('cursor', params.cursor)
+    if (params?.limit) qs.set('limit', String(params.limit))
+    const suffix = qs.toString() ? `?${qs}` : ''
+    return this.request(`/meetings${suffix}`)
+  }
+
+  /** Detalle completo: transcript + resumen (o 404 si nunca se ingirió nada). */
+  getMeeting(clientSessionId: string): Promise<MeetingDetailData> {
+    return this.request(`/meetings/${clientSessionId}`)
   }
 }

@@ -1,6 +1,8 @@
 import type {
   AuthState,
   CaptionSegment,
+  MeetingDetailData,
+  MeetingListPage,
   MicControlCmd,
   PermissionState,
   PermissionsStatus,
@@ -21,6 +23,9 @@ export const IPC = {
   captureStart: 'capture:start',
   captureStop: 'capture:stop',
   captureState: 'capture:state',
+  meetingsList: 'meetings:list',
+  meetingsGet: 'meetings:get',
+  meetingsAsk: 'meetings:ask',
   // renderer → main (fire-and-forget, alto volumen)
   micChunk: 'mic:chunk',
   micError: 'mic:error',
@@ -58,6 +63,11 @@ export interface UyariBridge {
     start(title?: string): Promise<SessionInfo>
     stop(): Promise<{ finished: boolean }>
     state(): Promise<SessionInfo | null>
+  }
+  meetings: {
+    list(params?: { cursor?: string; limit?: number }): Promise<MeetingListPage>
+    get(clientSessionId: string): Promise<MeetingDetailData>
+    ask(clientSessionId: string, question: string): Promise<{ answer: string }>
   }
   mic: {
     /** PCM16 mono al sample rate pedido por el main. */

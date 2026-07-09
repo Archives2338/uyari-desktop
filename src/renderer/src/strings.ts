@@ -1,3 +1,11 @@
+import type { Platform } from '@shared/domain'
+
+export const PLATFORM_LABEL: Record<Platform, string> = {
+  GOOGLE_MEET: 'Google Meet',
+  ZOOM: 'Zoom',
+  MS_TEAMS: 'Microsoft Teams',
+}
+
 // Copy del onboarding, centralizado para i18n (es-419, pt-BR después).
 // Portado del kit (Steps.js.txt → S). Cambio deliberado en welcome: el kit
 // asume "Continue with Google"; hoy el auth real es por email, así que el

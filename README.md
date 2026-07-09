@@ -20,6 +20,13 @@ Universal-Streaming** (requiere `ASSEMBLYAI_API_KEY` en `backend/.env.developmen
 Para desarrollar UI sin API key: `UYARI_CAPTURE=mock npm run dev`
 (conversación falsa por el mismo pipeline).
 
+Otras variables de dev:
+- `UYARI_ONBOARDING=1 npm run dev` — fuerza el wizard de onboarding desde el
+  inicio aunque ya esté completado (para iterar sobre esas pantallas). Las
+  respuestas guardadas se conservan como prefill; con sesión activa arranca
+  en el paso 2 (para ver el paso 1 de login: `await window.uyari.auth.logout()`
+  en la consola de DevTools y recargar).
+
 Otros comandos: `npm run typecheck`, `npm run build`, `npm run package`
 (genera el .app/.dmg sin firmar en `dist/`).
 

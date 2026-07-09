@@ -40,6 +40,14 @@ export function registerIpc({ settings, api, meetings, overlay }: Services): voi
   ipcMain.handle(IPC.captureStop, () => meetings.stop())
   ipcMain.handle(IPC.captureState, () => meetings.state())
 
+  ipcMain.handle(IPC.meetingsList, (_e, params?: { cursor?: string; limit?: number }) =>
+    api.listMeetings(params),
+  )
+  ipcMain.handle(IPC.meetingsGet, (_e, clientSessionId: string) => api.getMeeting(clientSessionId))
+  ipcMain.handle(IPC.meetingsAsk, (_e, clientSessionId: string, question: string) =>
+    api.ask(clientSessionId, question),
+  )
+
   // Audio del mic: alto volumen, fire-and-forget (send, no invoke).
   ipcMain.on(IPC.micChunk, (_e, chunk: ArrayBuffer) => meetings.acceptAudio(chunk))
   ipcMain.on(IPC.micError, (_e, message: string) => meetings.reportMicError(message))

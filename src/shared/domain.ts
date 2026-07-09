@@ -39,3 +39,52 @@ export interface AuthState {
   loggedIn: boolean
   email?: string
 }
+
+// Detalle/listado de reuniones (GET /meetings, GET /meetings/:id — backend
+// ya los tenía, los usa la extensión). Fechas llegan como ISO string (el
+// JSON de fetch no las revive a Date).
+
+export type SummaryStatus = 'PENDING' | 'PROCESSING' | 'DONE' | 'FAILED'
+
+export interface MeetingSummary {
+  status: SummaryStatus
+  content?: string | null
+  actionItems?: string[] | null
+  error?: string | null
+}
+
+export interface TranscriptSegmentRow {
+  providerMessageId: string
+  speaker?: string | null
+  text: string
+  tsOffsetMs: number
+}
+
+export interface MeetingDetailData {
+  id: string
+  clientSessionId: string
+  title?: string | null
+  platform: Platform
+  language?: string | null
+  startedAt: string
+  endedAt?: string | null
+  summary: MeetingSummary | null
+  segments: TranscriptSegmentRow[]
+}
+
+export interface MeetingListItem {
+  id: string
+  clientSessionId: string
+  title?: string | null
+  platform: Platform
+  language?: string | null
+  startedAt: string
+  endedAt?: string | null
+  summaryStatus: SummaryStatus | null
+  segmentCount: number
+}
+
+export interface MeetingListPage {
+  items: MeetingListItem[]
+  nextCursor: string | null
+}

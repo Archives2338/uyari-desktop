@@ -29,6 +29,12 @@ const bridge: UyariBridge = {
     stop: () => ipcRenderer.invoke(IPC.captureStop),
     state: () => ipcRenderer.invoke(IPC.captureState),
   },
+  meetings: {
+    list: (params) => ipcRenderer.invoke(IPC.meetingsList, params),
+    get: (clientSessionId) => ipcRenderer.invoke(IPC.meetingsGet, clientSessionId),
+    ask: (clientSessionId, question) =>
+      ipcRenderer.invoke(IPC.meetingsAsk, clientSessionId, question),
+  },
   mic: {
     chunk: (data) => ipcRenderer.send(IPC.micChunk, data),
     error: (message) => ipcRenderer.send(IPC.micError, message),

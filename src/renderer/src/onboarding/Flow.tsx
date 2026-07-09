@@ -19,16 +19,21 @@ const TOTAL = 8
 
 export function OnboardingFlow({
   loggedIn,
+  startFresh = false,
   onDone,
 }: {
   loggedIn: boolean
+  /** Dev (UYARI_ONBOARDING=1): arrancar del principio, ignorando el paso
+   *  guardado — las respuestas previas se conservan como prefill. */
+  startFresh?: boolean
   onDone: () => void
 }): React.JSX.Element {
   const [flow, setFlowState] = useState<OnboardingState>(() => {
     const saved = loadFlow()
     // Sin sesión siempre se arranca en el welcome/login; con sesión se
     // retoma donde quedó (mínimo paso 2: el 1 ya está cumplido).
-    return { ...saved, step: loggedIn ? Math.max(2, saved.step) : 1 }
+    const resumed = loggedIn ? Math.max(2, saved.step) : 1
+    return { ...saved, step: startFresh ? (loggedIn ? 2 : 1) : resumed }
   })
 
   useEffect(() => saveFlow(flow), [flow])

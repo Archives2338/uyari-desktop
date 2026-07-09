@@ -26,10 +26,18 @@ export function createMainWindow(): BrowserWindow {
     return { action: 'deny' }
   })
 
+  // UYARI_ONBOARDING=1 fuerza el wizard aunque ya esté completado (dev:
+  // iterar sobre las pantallas sin borrar localStorage a mano cada vez).
+  const forceOnboarding = process.env.UYARI_ONBOARDING === '1'
+
   if (process.env.ELECTRON_RENDERER_URL) {
-    void win.loadURL(process.env.ELECTRON_RENDERER_URL)
+    const url = new URL(process.env.ELECTRON_RENDERER_URL)
+    if (forceOnboarding) url.searchParams.set('onboarding', '1')
+    void win.loadURL(url.toString())
   } else {
-    void win.loadFile(join(import.meta.dirname, '../renderer/index.html'))
+    void win.loadFile(join(import.meta.dirname, '../renderer/index.html'), {
+      query: forceOnboarding ? { onboarding: '1' } : {},
+    })
   }
 
   return win

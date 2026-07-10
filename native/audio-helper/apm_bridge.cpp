@@ -12,6 +12,7 @@ struct ApmHandle {
   webrtc::StreamConfig renderConfig;
   webrtc::StreamConfig captureConfig;
   std::atomic<bool> bypass{false};
+  std::atomic<int> delayMs{0};
 };
 
 namespace {
@@ -71,6 +72,8 @@ int apm_process_render(ApmHandle* h, const int16_t* frame) {
 
 int apm_process_capture(ApmHandle* h, int16_t* frame) {
   if (h->bypass.load(std::memory_order_relaxed)) return 0;
+  // El APM exige el delay por-frame (se resetea tras cada ProcessStream).
+  h->apm->set_stream_delay_ms(h->delayMs.load(std::memory_order_relaxed));
   // In-place: src == dest está soportado por el APM.
   return h->apm->ProcessStream(frame, h->captureConfig, h->captureConfig,
                                frame);
@@ -78,6 +81,13 @@ int apm_process_capture(ApmHandle* h, int16_t* frame) {
 
 void apm_set_bypass(ApmHandle* h, int bypass) {
   h->bypass.store(bypass != 0, std::memory_order_relaxed);
+}
+
+void apm_set_stream_delay_ms(ApmHandle* h, int delay_ms) {
+  // El APM acota internamente a [0, 500]; clampear aquí evita el warning.
+  if (delay_ms < 0) delay_ms = 0;
+  if (delay_ms > 500) delay_ms = 500;
+  h->delayMs.store(delay_ms, std::memory_order_relaxed);
 }
 
 void apm_destroy(ApmHandle* h) {

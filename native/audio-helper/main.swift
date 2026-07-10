@@ -271,12 +271,43 @@ final class FrameChunker {
 // no hay plegado y el AEC ve el espectro completo.
 var apmHandle: OpaquePointer? = nil
 var apmCaptureRate = 0
+var apmRenderFrame = 0 // samples por frame de render (480 a 48 kHz)
 var micChunker: FrameChunker? = nil
 var renderChunker: FrameChunker? = nil
 // Diagnóstico: el primer error de cada lado del APM se loguea una vez (un
 // error persistente = ese stream NO se está procesando).
 var apmRenderErrLogged = false
 var apmCaptureErrLogged = false
+
+// El render del AEC debe ser CONTINUO: un cliente VoIP alimenta el far-end
+// desde el callback de playout, que dispara SIEMPRE (con ceros en el
+// silencio). Nuestro tap solo dispara cuando algo SUENA — sin relleno, el
+// render stream se muere de hambre entre frases, los contadores de muestra
+// render/capture se desalinean y el estimador de delay tiene que
+// re-engancharse en cada inicio de habla (fuga de eco al arrancar frases).
+//
+// Diseño: el IOProc procesa sus frames DIRECTO (la cadencia real del
+// dispositivo es la mejor referencia); un feeder aparte inyecta frames de
+// ceros SOLO cuando hay un hueco real (>100 ms sin frames del tap = silencio
+// del sistema). OJO: NO inyectar ceros entre frames activos — un cero en
+// medio del habla desalinea la referencia y desploma la cancelación
+// (medido: 18 dB → 8.7 dB con un feeder que metía ceros por carrera).
+let renderFeedLock = NSLock()
+var lastRenderFeedNs: UInt64 = 0
+
+func feedRender(_ frame: inout [Int16]) {
+    guard let apm = apmHandle else { return }
+    renderFeedLock.lock()
+    frame.withUnsafeMutableBufferPointer {
+        let status = apm_process_render(apm, $0.baseAddress)
+        if status != 0 && !apmRenderErrLogged {
+            apmRenderErrLogged = true
+            log("AEC3: process_render devolvió \(status) — el far-end NO se está procesando")
+        }
+    }
+    lastRenderFeedNs = DispatchTime.now().uptimeNanoseconds
+    renderFeedLock.unlock()
+}
 
 func floatsToInt16(_ input: [Float]) -> [Int16] {
     var out = [Int16](repeating: 0, count: input.count)
@@ -388,16 +419,10 @@ let ioStatus = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, nil) {
     // Far-end del AEC3: lo que suena por los parlantes es la referencia que
     // se resta del mic. Se alimenta CRUDO a la rate nativa del tap (sin el
     // downsample a 16k, que mete aliasing — ver la sección AEC3).
-    if let apm = apmHandle, let chunker = renderChunker {
+    if apmHandle != nil, let chunker = renderChunker {
         let ints = floatsToInt16(mono)
         _ = chunker.drain(ints) { frame in
-            frame.withUnsafeMutableBufferPointer {
-                let status = apm_process_render(apm, $0.baseAddress)
-                if status != 0 && !apmRenderErrLogged {
-                    apmRenderErrLogged = true
-                    log("AEC3: process_render devolvió \(status) — el far-end NO se está procesando")
-                }
-            }
+            feedRender(&frame) // directo, a la cadencia real del dispositivo
         }
     }
     // El canal "Them" del STT recibe el audio tal cual (el AEC solo toca el mic).
@@ -684,11 +709,13 @@ func startMicAuhal() -> Bool {
         if let apm = apmHandle {
             micChunker = FrameChunker(frame: Int(apm_capture_frame_samples(apm)))
             renderChunker = FrameChunker(frame: Int(apm_render_frame_samples(apm)))
+            apmRenderFrame = Int(apm_render_frame_samples(apm))
             apmCaptureRate = Int(rate)
             log("AEC3: APM creado (render \(Int(systemRate)) Hz / capture \(Int(rate)) Hz, nativo)")
         } else {
             micChunker = nil
             renderChunker = nil
+            apmRenderFrame = 0
             apmCaptureRate = 0
             log("AEC3: rate no soportada (\(Int(systemRate))/\(Int(rate))) — mic CRUDO sin AEC")
         }
@@ -780,6 +807,59 @@ func outputLikelyHeadphones() -> Bool {
     }
 }
 
+// --- Delay externo real → AEC3 (delta #1 confirmado del binario de Granola:
+// SetAudioBufferDelay con la latencia de los devices, no solo el estimador).
+// Delay total ≈ latencia del output (el far-end sale con retraso hacia el
+// parlante) + latencia del input (el eco tarda en entrar del mic). Cada una
+// = Latency + SafetyOffset + BufferFrameSize del device, a su rate.
+
+func defaultOutputDevice() -> AudioObjectID {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var deviceID = AudioObjectID(kAudioObjectUnknown)
+    var size = UInt32(MemoryLayout<AudioObjectID>.size)
+    AudioObjectGetPropertyData(
+        AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID
+    )
+    return deviceID
+}
+
+func deviceLatencyMs(_ deviceID: AudioObjectID, scope: AudioObjectPropertyScope) -> Double {
+    guard deviceID != kAudioObjectUnknown else { return 0 }
+    func frames(_ selector: AudioObjectPropertySelector) -> UInt32 {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain
+        )
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &value) == noErr
+        else { return 0 }
+        return value
+    }
+    let total = frames(kAudioDevicePropertyLatency)
+        + frames(kAudioDevicePropertySafetyOffset)
+        + frames(kAudioDevicePropertyBufferFrameSize)
+    let rate = deviceSampleRate(deviceID)
+    return Double(total) / rate * 1000
+}
+
+var lastReportedDelayMs = -1
+
+func updateStreamDelay() {
+    guard let apm = apmHandle else { return }
+    let outMs = deviceLatencyMs(defaultOutputDevice(), scope: kAudioObjectPropertyScopeOutput)
+    let inMs = deviceLatencyMs(defaultInputDevice(), scope: kAudioObjectPropertyScopeInput)
+    let total = Int(outMs + inMs)
+    apm_set_stream_delay_ms(apm, Int32(total))
+    if total != lastReportedDelayMs {
+        lastReportedDelayMs = total
+        log("AEC3: delay externo reportado \(total) ms (out \(Int(outMs)) + in \(Int(inMs)))")
+    }
+}
+
 var aecBypassed: Bool? = nil // nil = aún no evaluado (fuerza el primer log)
 
 func updateAecBypass() {
@@ -800,6 +880,28 @@ func updateAecBypass() {
 if micMode == "auhal" {
     if !startMicAuhal() { fail("no pude arrancar el mic (AUHAL)") }
     updateAecBypass()
+    updateStreamDelay()
+
+    // Feeder de silencio del render (ver nota en la sección AEC3): inyecta
+    // ceros SOLO cuando el tap lleva >100 ms callado (silencio real del
+    // sistema), a cadencia de 10 ms, para que los contadores render/capture
+    // no se desalineen durante los huecos. Nunca compite con frames activos.
+    Thread.detachNewThread {
+        var zeroFrame: [Int16] = []
+        while true {
+            usleep(10_000)
+            guard apmHandle != nil, !paused else { continue }
+            let frameSize = apmRenderFrame
+            guard frameSize > 0 else { continue }
+            let now = DispatchTime.now().uptimeNanoseconds
+            let last = lastRenderFeedNs
+            guard last > 0, now - last > 100_000_000 else { continue }
+            if zeroFrame.count != frameSize {
+                zeroFrame = [Int16](repeating: 0, count: frameSize)
+            }
+            feedRender(&zeroFrame)
+        }
+    }
 } else {
     if !startMic(useVoiceProcessing: true) { fail("no pude arrancar el mic") }
 }
@@ -817,8 +919,10 @@ Thread.detachNewThread {
     while true {
         Thread.sleep(forTimeInterval: 1)
         // Re-chequear auriculares vs parlantes (enchufar al jack no cambia el
-        // default device, así que se sondea; la lectura es barata).
+        // default device, así que se sondea; la lectura es barata) y refrescar
+        // el delay externo (cambia con el device/buffer size).
         updateAecBypass()
+        updateStreamDelay()
         // En pausa el mic está detenido a propósito: cero señal es lo esperado,
         // no un mic mudo. No contar strikes ni intentar rescate.
         if paused {

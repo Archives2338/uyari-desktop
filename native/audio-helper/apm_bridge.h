@@ -55,6 +55,14 @@ int apm_process_capture(ApmHandle* h, int16_t* frame);
 // bypass != 0 → process_capture es passthrough (modo auriculares).
 void apm_set_bypass(ApmHandle* h, int bypass);
 
+// Delay externo medido (ms) entre "un sample entra al render" y "su eco
+// aparece en el capture": latencias de los devices de salida y entrada
+// (kAudioDevicePropertyLatency + SafetyOffset + BufferFrameSize). Granola
+// hace lo mismo (SetAudioBufferDelay en su binario): darle el delay real
+// al AEC3 acelera la convergencia y mejora la cancelación en los inicios.
+// Se aplica en cada process_capture (la API del APM lo exige por-frame).
+void apm_set_stream_delay_ms(ApmHandle* h, int delay_ms);
+
 void apm_destroy(ApmHandle* h);
 
 #ifdef __cplusplus

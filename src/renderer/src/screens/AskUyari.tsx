@@ -5,9 +5,12 @@ import { S } from '@renderer/strings'
 import { loadFlow } from '@renderer/onboarding/state'
 import { Sidebar } from '@renderer/components/Sidebar'
 import {
-  loadAskHistory,
-  pushAskConversation,
-  type AskConversation,
+  loadAskThreads,
+  createAskThread,
+  appendAskTurn,
+  replaceAskTurn,
+  type AskThread,
+  type AskTurn,
 } from '@renderer/lib/askHistory'
 import { dayBucketLabel, formatRelativeDate, formatTimeAgo } from '@renderer/lib/dates'
 import type { MeetingListItem } from '@shared/domain'
@@ -18,15 +21,20 @@ import flameIcon from '@renderer/assets/uyari-flame-violet.svg'
 // — no Flow.js.txt/Flow2.js.txt, que son el controlador del ONBOARDING,
 // no el chat (confundible por el nombre "Flow").
 //
-// Alcance real vs el mock: el backend responde preguntas SUELTAS (sin
-// memoria de conversación — igual que el ask por reunión que ya existía),
-// así que cada envío crea una entrada de historial nueva en vez de
-// simular un hilo multi-turno que no tenemos. Las tarjetas de cita SON
-// reales: el LLM declara de qué reuniones sacó la respuesta (ver
-// ASK_ALL_SYSTEM_PROMPT en el backend) y la UI solo pinta esas — nunca
-// inventa una fuente. El historial (Recientes/CH1, grupo Hoy-Ayer/CH2 en
-// el MISMO sidebar de nav — no una columna nueva) se persiste LOCAL
-// (localStorage, ver lib/askHistory.ts): el backend no tiene un modelo de
+// Modelo de datos: un THREAD con TURNOS (patrón chat_thread/chat_message
+// de Granola, RE en os/granola-desktop.md §1b — un solo motor de chat, un
+// follow-up es el turno N+1 del MISMO hilo). Antes cada pregunta creaba
+// una entrada de historial suelta — un usuario cazó el bug probando: un
+// follow-up abría un chat nuevo en vez de continuar la conversación.
+// Además de agrupar visualmente, el backend ahora recibe los turnos
+// previos como contexto (`history` en askAll) — sin eso, agrupar sería
+// solo cosmético: un follow-up como "¿quiénes participaron?" no sabría a
+// qué se refiere "esa reunión" sin ver la pregunta anterior.
+//
+// Las tarjetas de cita SON reales: el LLM declara de qué reuniones sacó
+// la respuesta (ver ASK_ALL_SYSTEM_PROMPT en el backend) y la UI solo
+// pinta esas — nunca inventa una fuente. El historial se persiste LOCAL
+// (localStorage, ver lib/askHistory.ts): el backend no tiene tablas de
 // conversación todavía, así que no sincroniza entre devices.
 //
 // Deliberadamente NO incluido: "Ver todas ›" de Recetas (solo hay 4, no
@@ -70,14 +78,14 @@ function renderBold(text: string): ReactNode {
   )
 }
 
-function groupHistoryByDay(history: AskConversation[]): Array<[string, AskConversation[]]> {
-  const map = new Map<string, AskConversation[]>()
-  for (const h of history) {
-    const bucket = dayBucketLabel(h.createdAt)
+function groupThreadsByDay(threads: AskThread[]): Array<[string, AskThread[]]> {
+  const map = new Map<string, AskThread[]>()
+  for (const t of threads) {
+    const bucket = dayBucketLabel(t.updatedAt)
     const label = bucket === 'Today' ? S.ask.todayGroup : bucket === 'Yesterday' ? S.ask.yesterdayGroup : bucket
     const list = map.get(label)
-    if (list) list.push(h)
-    else map.set(label, [h])
+    if (list) list.push(t)
+    else map.set(label, [t])
   }
   return [...map.entries()]
 }
@@ -91,8 +99,8 @@ function ScopeSelect({
   scope: string
   onChange: (v: string) => void
   meetings: MeetingListItem[]
-  /** Si hay una respuesta activa con citas, ofrece "N meetings" acotado a
-   *  esas fuentes — el "2 reuniones ▾" del mock, pero funcional de verdad. */
+  /** Si el último turno tiene citas, ofrece "N meetings" acotado a esas
+   *  fuentes — el "2 reuniones ▾" del mock, pero funcional de verdad. */
   citedCount?: number
 }): React.JSX.Element {
   return (
@@ -223,10 +231,10 @@ function Composer({
 
 function ChatHome({
   displayName,
-  history,
+  threads,
   showAllRecent,
   onToggleShowAll,
-  onSelectHistory,
+  onSelectThread,
   input,
   onInputChange,
   scope,
@@ -237,10 +245,10 @@ function ChatHome({
   loading,
 }: {
   displayName?: string
-  history: AskConversation[]
+  threads: AskThread[]
   showAllRecent: boolean
   onToggleShowAll: () => void
-  onSelectHistory: (id: string) => void
+  onSelectThread: (id: string) => void
   input: string
   onInputChange: (v: string) => void
   scope: string
@@ -250,7 +258,7 @@ function ChatHome({
   onRecipe: (text: string) => void
   loading: boolean
 }): React.JSX.Element {
-  const shown = showAllRecent ? history : history.slice(0, 5)
+  const shown = showAllRecent ? threads : threads.slice(0, 5)
   return (
     <div
       style={{
@@ -287,7 +295,7 @@ function ChatHome({
         disabled={loading}
       />
 
-      {history.length > 0 && (
+      {threads.length > 0 && (
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
             <span
@@ -295,7 +303,7 @@ function ChatHome({
             >
               {S.ask.recentTitle}
             </span>
-            {history.length > 5 && (
+            {threads.length > 5 && (
               <button
                 onClick={onToggleShowAll}
                 style={{
@@ -311,8 +319,8 @@ function ChatHome({
               </button>
             )}
           </div>
-          {shown.map((h) => (
-            <div key={h.id} className="ask-recent-row" onClick={() => onSelectHistory(h.id)}>
+          {shown.map((t) => (
+            <div key={t.id} className="ask-recent-row" onClick={() => onSelectThread(t.id)}>
               <span className="ask-recent-icon">
                 {dIcon(['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6'], 1.6, 13)}
               </span>
@@ -328,10 +336,10 @@ function ChatHome({
                   whiteSpace: 'nowrap',
                 }}
               >
-                {h.question}
+                {t.title}
               </span>
               <span style={{ marginLeft: 'auto', font: 'var(--text-xs)', fontWeight: 400, color: 'var(--ink-4)' }}>
-                {formatTimeAgo(h.createdAt)}
+                {formatTimeAgo(t.updatedAt)}
               </span>
             </div>
           ))}
@@ -355,8 +363,9 @@ function ChatHome({
   )
 }
 
-function ConversationView({
-  entry,
+function TurnBlock({
+  turn,
+  isLast,
   loading,
   checked,
   onToggleCheck,
@@ -367,14 +376,9 @@ function ConversationView({
   onFollowUp,
   followUpNotice,
   onAskFollowUp,
-  input,
-  onInputChange,
-  scope,
-  onScopeChange,
-  meetings,
-  onSubmit,
 }: {
-  entry: AskConversation
+  turn: AskTurn
+  isLast: boolean
   loading: boolean
   checked: Set<string>
   onToggleCheck: (key: string) => void
@@ -385,6 +389,129 @@ function ConversationView({
   onFollowUp: () => void
   followUpNotice: boolean
   onAskFollowUp: (text: string) => void
+}): React.JSX.Element {
+  const allActionItems = turn.citations.flatMap((c, ci) =>
+    c.actionItems.map((item, ii) => ({ key: `${turn.id}:${ci}:${ii}`, item })),
+  )
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div className="ask-question-bubble">{turn.question}</div>
+
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+        <img src={flameIcon} alt="" style={{ height: 26, marginTop: 2, flexShrink: 0 }} />
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ font: 'var(--text-sm)', fontSize: 14, color: 'var(--ink)', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>
+            {renderBold(turn.answer)}
+          </div>
+
+          {turn.citations.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {turn.citations.map((c) => (
+                <div key={c.clientSessionId} className="ask-citation-card">
+                  <span
+                    style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--violet)', flexShrink: 0 }}
+                  />
+                  <span className="ask-citation-title">
+                    {c.title || 'Untitled meeting'}
+                    <span className="ask-citation-meta"> · {formatRelativeDate(c.occurredAt)}</span>
+                  </span>
+                  <button className="ask-citation-open" onClick={() => onOpenNote(c.clientSessionId)}>
+                    {S.ask.openNote}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {allActionItems.length > 0 && (
+            <div className="ask-action-items">
+              <span
+                style={{ font: 'var(--eyebrow)', letterSpacing: 'var(--eyebrow-tracking)', color: 'var(--accent-strong)' }}
+              >
+                {S.ask.relatedActionItems}
+              </span>
+              {allActionItems.map(({ key, item }) => (
+                <label
+                  key={key}
+                  style={{ display: 'flex', gap: 8, alignItems: 'flex-start', font: 'var(--text-sm)', fontSize: 13, color: 'var(--ink)', cursor: 'pointer' }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked.has(key)}
+                    onChange={() => onToggleCheck(key)}
+                    style={{ marginTop: 3 }}
+                  />
+                  <span style={{ textDecoration: checked.has(key) ? 'line-through' : 'none', opacity: checked.has(key) ? 0.6 : 1 }}>
+                    {item}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <button className="ask-answer-action" onClick={onCopy}>
+              {dIcon(COPY_ICON, 1.7, 13)}
+              {copied ? S.ask.copied : S.ask.copy}
+            </button>
+            <button className="ask-answer-action" onClick={onFollowUp}>
+              {dIcon(MAIL_ICON, 1.7, 13)}
+              {S.ask.sendAsFollowUp}
+            </button>
+            <button className="ask-answer-action" onClick={onRegenerate} disabled={loading}>
+              {dIcon(REGENERATE_ICON, 1.7, 13)}
+              {S.ask.regenerate}
+            </button>
+          </div>
+          {followUpNotice && (
+            <span style={{ font: 'var(--text-xs)', color: 'var(--ink-4)' }}>{S.ask.followUpComingSoon}</span>
+          )}
+
+          {isLast && turn.followUps.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {turn.followUps.map((f) => (
+                <button key={f} className="ask-chip" onClick={() => onAskFollowUp(f)} disabled={loading}>
+                  {f}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ConversationView({
+  thread,
+  loading,
+  checked,
+  onToggleCheck,
+  onOpenNote,
+  onRegenerate,
+  onCopy,
+  copiedTurnId,
+  onFollowUp,
+  followUpNoticeTurnId,
+  onAskFollowUp,
+  input,
+  onInputChange,
+  scope,
+  onScopeChange,
+  meetings,
+  onSubmit,
+}: {
+  thread: AskThread
+  loading: boolean
+  checked: Set<string>
+  onToggleCheck: (key: string) => void
+  onOpenNote: (clientSessionId: string) => void
+  onRegenerate: (turn: AskTurn) => void
+  onCopy: (turn: AskTurn) => void
+  copiedTurnId: string | null
+  onFollowUp: (turn: AskTurn) => void
+  followUpNoticeTurnId: string | null
+  onAskFollowUp: (text: string) => void
   input: string
   onInputChange: (v: string) => void
   scope: string
@@ -392,9 +519,7 @@ function ConversationView({
   meetings: MeetingListItem[]
   onSubmit: () => void
 }): React.JSX.Element {
-  const allActionItems = entry.citations.flatMap((c, ci) =>
-    c.actionItems.map((item, ii) => ({ key: `${entry.id}:${ci}:${ii}`, item })),
-  )
+  const lastTurn = thread.turns[thread.turns.length - 1]
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
       <div
@@ -406,93 +531,27 @@ function ConversationView({
           padding: '40px 0 20px',
           display: 'flex',
           flexDirection: 'column',
-          gap: 18,
+          gap: 28,
           boxSizing: 'border-box',
         }}
       >
-        <div className="ask-question-bubble">{entry.question}</div>
-
-        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-          <img src={flameIcon} alt="" style={{ height: 26, marginTop: 2, flexShrink: 0 }} />
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ font: 'var(--text-sm)', fontSize: 14, color: 'var(--ink)', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>
-              {renderBold(entry.answer)}
-            </div>
-
-            {entry.citations.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {entry.citations.map((c) => (
-                  <div key={c.clientSessionId} className="ask-citation-card">
-                    <span
-                      style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--violet)', flexShrink: 0 }}
-                    />
-                    <span className="ask-citation-title">
-                      {c.title || 'Untitled meeting'}
-                      <span className="ask-citation-meta"> · {formatRelativeDate(c.occurredAt)}</span>
-                    </span>
-                    <button className="ask-citation-open" onClick={() => onOpenNote(c.clientSessionId)}>
-                      {S.ask.openNote}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {allActionItems.length > 0 && (
-              <div className="ask-action-items">
-                <span
-                  style={{ font: 'var(--eyebrow)', letterSpacing: 'var(--eyebrow-tracking)', color: 'var(--accent-strong)' }}
-                >
-                  {S.ask.relatedActionItems}
-                </span>
-                {allActionItems.map(({ key, item }) => (
-                  <label
-                    key={key}
-                    style={{ display: 'flex', gap: 8, alignItems: 'flex-start', font: 'var(--text-sm)', fontSize: 13, color: 'var(--ink)', cursor: 'pointer' }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked.has(key)}
-                      onChange={() => onToggleCheck(key)}
-                      style={{ marginTop: 3 }}
-                    />
-                    <span style={{ textDecoration: checked.has(key) ? 'line-through' : 'none', opacity: checked.has(key) ? 0.6 : 1 }}>
-                      {item}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-              <button className="ask-answer-action" onClick={onCopy}>
-                {dIcon(COPY_ICON, 1.7, 13)}
-                {copied ? S.ask.copied : S.ask.copy}
-              </button>
-              <button className="ask-answer-action" onClick={onFollowUp}>
-                {dIcon(MAIL_ICON, 1.7, 13)}
-                {S.ask.sendAsFollowUp}
-              </button>
-              <button className="ask-answer-action" onClick={onRegenerate} disabled={loading}>
-                {dIcon(REGENERATE_ICON, 1.7, 13)}
-                {S.ask.regenerate}
-              </button>
-            </div>
-            {followUpNotice && (
-              <span style={{ font: 'var(--text-xs)', color: 'var(--ink-4)' }}>{S.ask.followUpComingSoon}</span>
-            )}
-
-            {entry.followUps.length > 0 && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {entry.followUps.map((f) => (
-                  <button key={f} className="ask-chip" onClick={() => onAskFollowUp(f)} disabled={loading}>
-                    {f}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+        {thread.turns.map((turn) => (
+          <TurnBlock
+            key={turn.id}
+            turn={turn}
+            isLast={turn.id === lastTurn.id}
+            loading={loading}
+            checked={checked}
+            onToggleCheck={onToggleCheck}
+            onOpenNote={onOpenNote}
+            onRegenerate={() => onRegenerate(turn)}
+            onCopy={() => onCopy(turn)}
+            copied={copiedTurnId === turn.id}
+            onFollowUp={() => onFollowUp(turn)}
+            followUpNotice={followUpNoticeTurnId === turn.id}
+            onAskFollowUp={onAskFollowUp}
+          />
+        ))}
       </div>
 
       <div style={{ maxWidth: 620, width: '100%', margin: '0 auto', padding: '10px 0 20px', boxSizing: 'border-box' }}>
@@ -504,7 +563,7 @@ function ConversationView({
           scope={scope}
           onScopeChange={onScopeChange}
           meetings={meetings}
-          citedCount={entry.citations.length}
+          citedCount={lastTurn.citations.length}
           disabled={loading}
         />
       </div>
@@ -519,8 +578,8 @@ export function AskUyari(): React.JSX.Element {
   const flow = useMemo(loadFlow, [])
   const displayName = useMemo(() => deriveDisplayName(auth.email), [auth.email])
 
-  const [history, setHistory] = useState<AskConversation[]>(() => loadAskHistory())
-  const [activeId, setActiveId] = useState<string | null>(null)
+  const [threads, setThreads] = useState<AskThread[]>(() => loadAskThreads())
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [scope, setScope] = useState('all')
   const [meetings, setMeetings] = useState<MeetingListItem[]>([])
@@ -528,8 +587,8 @@ export function AskUyari(): React.JSX.Element {
   const [error, setError] = useState('')
   const [showAllRecent, setShowAllRecent] = useState(false)
   const [checked, setChecked] = useState<Set<string>>(new Set())
-  const [copiedId, setCopiedId] = useState<string | null>(null)
-  const [followUpNoticeId, setFollowUpNoticeId] = useState<string | null>(null)
+  const [copiedTurnId, setCopiedTurnId] = useState<string | null>(null)
+  const [followUpNoticeTurnId, setFollowUpNoticeTurnId] = useState<string | null>(null)
 
   useEffect(() => {
     // Alimenta el selector de alcance con reuniones reales (título, id).
@@ -541,30 +600,36 @@ export function AskUyari(): React.JSX.Element {
       })
   }, [])
 
-  const active = history.find((h) => h.id === activeId) ?? null
+  const active = threads.find((t) => t.id === activeThreadId) ?? null
+  const lastTurn = active ? active.turns[active.turns.length - 1] : null
 
-  // Alcance del composer inferior: si la respuesta activa citó reuniones,
-  // arranca acotado a esas (el "2 reuniones ▾" del mock, pero real — no
-  // solo un label). Cambiar de conversación resetea el alcance.
+  // Alcance del composer: si el último turno citó reuniones, arranca
+  // acotado a esas (el "2 reuniones ▾" del mock, pero real — no solo un
+  // label). Cambiar de hilo resetea el alcance; agregar turnos al MISMO
+  // hilo no lo pisa (resolveMeetingIds relee lastTurn en cada envío).
   useEffect(() => {
-    setScope(active && active.citations.length > 0 ? 'cited' : 'all')
+    setScope(active && active.turns[active.turns.length - 1].citations.length > 0 ? 'cited' : 'all')
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId])
+  }, [activeThreadId])
 
   const resolveMeetingIds = (): string[] | undefined => {
-    if (scope === 'cited' && active) return active.citations.map((c) => c.clientSessionId)
+    if (scope === 'cited' && lastTurn) return lastTurn.citations.map((c) => c.clientSessionId)
     if (scope === 'all' || scope === 'cited') return undefined
     return [scope]
   }
 
+  /** Pregunta nueva: crea hilo si no hay uno abierto, si no agrega un turno
+   *  al hilo activo — con los turnos previos como contexto (ver comentario
+   *  de arriba: sin esto un follow-up no sabe a qué se refiere). */
   const submit = async (question: string): Promise<void> => {
     const q = question.trim()
     if (!q || loading) return
     setLoading(true)
     setError('')
     try {
-      const result = await window.uyari.meetings.askAll(q, resolveMeetingIds())
-      const entry: AskConversation = {
+      const priorTurns = active?.turns.slice(-6).map((t) => ({ question: t.question, answer: t.answer }))
+      const result = await window.uyari.meetings.askAll(q, resolveMeetingIds(), priorTurns)
+      const turn: AskTurn = {
         id: crypto.randomUUID(),
         question: q,
         answer: result.answer,
@@ -572,9 +637,42 @@ export function AskUyari(): React.JSX.Element {
         followUps: result.followUps,
         createdAt: new Date().toISOString(),
       }
-      setHistory(pushAskConversation(entry))
-      setActiveId(entry.id)
+      if (active) {
+        setThreads(appendAskTurn(active.id, turn))
+      } else {
+        const next = createAskThread(turn)
+        setThreads(next)
+        setActiveThreadId(next[0].id)
+      }
       setInput('')
+    } catch {
+      setError(S.ask.error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  /** Regenerar: re-pregunta lo mismo con el contexto previo a ESE turno
+   *  (no el hilo completo) y lo reemplaza en su lugar. */
+  const regenerateTurn = async (turn: AskTurn): Promise<void> => {
+    if (!active || loading) return
+    const idx = active.turns.findIndex((t) => t.id === turn.id)
+    if (idx < 0) return
+    setLoading(true)
+    setError('')
+    try {
+      const priorTurns = active.turns
+        .slice(0, idx)
+        .slice(-6)
+        .map((t) => ({ question: t.question, answer: t.answer }))
+      const result = await window.uyari.meetings.askAll(turn.question, resolveMeetingIds(), priorTurns)
+      const updated: AskTurn = {
+        ...turn,
+        answer: result.answer,
+        citations: result.citations,
+        followUps: result.followUps,
+      }
+      setThreads(replaceAskTurn(active.id, updated))
     } catch {
       setError(S.ask.error)
     } finally {
@@ -590,17 +688,17 @@ export function AskUyari(): React.JSX.Element {
       return next
     })
 
-  const copyAnswer = (entry: AskConversation): void => {
-    void navigator.clipboard.writeText(entry.answer)
-    setCopiedId(entry.id)
-    setTimeout(() => setCopiedId((id) => (id === entry.id ? null : id)), 1500)
+  const copyTurn = (turn: AskTurn): void => {
+    void navigator.clipboard.writeText(turn.answer)
+    setCopiedTurnId(turn.id)
+    setTimeout(() => setCopiedTurnId((id) => (id === turn.id ? null : id)), 1500)
   }
 
   // Sin integración de email/Slack todavía: affordance real de roadmap con
   // aviso, no un botón mudo (mismo patrón que el panel de calendario).
-  const sendFollowUp = (entry: AskConversation): void => {
-    setFollowUpNoticeId(entry.id)
-    setTimeout(() => setFollowUpNoticeId((id) => (id === entry.id ? null : id)), 2500)
+  const sendFollowUp = (turn: AskTurn): void => {
+    setFollowUpNoticeTurnId(turn.id)
+    setTimeout(() => setFollowUpNoticeTurnId((id) => (id === turn.id ? null : id)), 2500)
   }
 
   return (
@@ -612,23 +710,30 @@ export function AskUyari(): React.JSX.Element {
         onHome={closeAsk}
         askHistory={
           active
-            ? { groups: groupHistoryByDay(history), activeId, onSelect: setActiveId }
+            ? {
+                groups: groupThreadsByDay(threads).map(([label, list]) => [
+                  label,
+                  list.map((t) => ({ id: t.id, question: t.title })),
+                ]),
+                activeId: activeThreadId,
+                onSelect: setActiveThreadId,
+              }
             : undefined
         }
       />
       <main style={{ flex: 1, overflowY: 'auto', padding: '0 40px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
         {active ? (
           <ConversationView
-            entry={active}
+            thread={active}
             loading={loading}
             checked={checked}
             onToggleCheck={toggleChecked}
             onOpenNote={openMeeting}
-            onRegenerate={() => void submit(active.question)}
-            onCopy={() => copyAnswer(active)}
-            copied={copiedId === active.id}
-            onFollowUp={() => sendFollowUp(active)}
-            followUpNotice={followUpNoticeId === active.id}
+            onRegenerate={(turn) => void regenerateTurn(turn)}
+            onCopy={copyTurn}
+            copiedTurnId={copiedTurnId}
+            onFollowUp={sendFollowUp}
+            followUpNoticeTurnId={followUpNoticeTurnId}
             onAskFollowUp={(text) => void submit(text)}
             input={input}
             onInputChange={setInput}
@@ -640,10 +745,10 @@ export function AskUyari(): React.JSX.Element {
         ) : (
           <ChatHome
             displayName={displayName}
-            history={history}
+            threads={threads}
             showAllRecent={showAllRecent}
             onToggleShowAll={() => setShowAllRecent((v) => !v)}
-            onSelectHistory={setActiveId}
+            onSelectThread={setActiveThreadId}
             input={input}
             onInputChange={setInput}
             scope={scope}

@@ -154,11 +154,16 @@ export class ApiClient {
     })
   }
 
-  /** Chat global ("Pregúntale a Uyari"): contra el historial, con citas. */
-  askAll(question: string, meetingIds?: string[]): Promise<AskAllResponse> {
+  /** Chat global ("Pregúntale a Uyari"): contra el historial, con citas.
+   *  `history` = turnos previos del mismo hilo (contexto de conversación). */
+  askAll(
+    question: string,
+    meetingIds?: string[],
+    history?: Array<{ question: string; answer: string }>,
+  ): Promise<AskAllResponse> {
     return this.request('/meetings/ask', {
       method: 'POST',
-      body: JSON.stringify({ question, meetingIds }),
+      body: JSON.stringify({ question, meetingIds, history }),
     })
   }
 

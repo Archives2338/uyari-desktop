@@ -84,8 +84,14 @@ export interface UyariBridge {
     get(clientSessionId: string): Promise<MeetingDetailData>
     ask(clientSessionId: string, question: string): Promise<{ answer: string }>
     /** Chat global: pregunta contra el historial, con citas trazables.
-     *  `meetingIds` acota el alcance; sin acotar usa las más recientes. */
-    askAll(question: string, meetingIds?: string[]): Promise<AskAllResponse>
+     *  `meetingIds` acota el alcance; sin acotar usa las más recientes.
+     *  `history` = turnos previos del MISMO hilo (para que un follow-up
+     *  como "¿quiénes participaron?" sepa a qué se refiere). */
+    askAll(
+      question: string,
+      meetingIds?: string[],
+      history?: Array<{ question: string; answer: string }>,
+    ): Promise<AskAllResponse>
     /** Activa el link público de solo-lectura y devuelve la URL. */
     share(clientSessionId: string): Promise<{ url: string }>
   }

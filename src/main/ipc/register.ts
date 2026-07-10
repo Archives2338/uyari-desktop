@@ -49,8 +49,10 @@ export function registerIpc({ settings, api, meetings, overlay }: Services): voi
   ipcMain.handle(IPC.meetingsAsk, (_e, clientSessionId: string, question: string) =>
     api.ask(clientSessionId, question),
   )
-  ipcMain.handle(IPC.meetingsAskAll, (_e, question: string, meetingIds?: string[]) =>
-    api.askAll(question, meetingIds),
+  ipcMain.handle(
+    IPC.meetingsAskAll,
+    (_e, question: string, meetingIds?: string[], history?: Array<{ question: string; answer: string }>) =>
+      api.askAll(question, meetingIds, history),
   )
   ipcMain.handle(IPC.meetingsShare, (_e, clientSessionId: string) => api.share(clientSessionId))
 

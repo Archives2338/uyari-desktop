@@ -36,7 +36,8 @@ const bridge: UyariBridge = {
     get: (clientSessionId) => ipcRenderer.invoke(IPC.meetingsGet, clientSessionId),
     ask: (clientSessionId, question) =>
       ipcRenderer.invoke(IPC.meetingsAsk, clientSessionId, question),
-    askAll: (question, meetingIds) => ipcRenderer.invoke(IPC.meetingsAskAll, question, meetingIds),
+    askAll: (question, meetingIds, history) =>
+      ipcRenderer.invoke(IPC.meetingsAskAll, question, meetingIds, history),
     share: (clientSessionId) => ipcRenderer.invoke(IPC.meetingsShare, clientSessionId),
   },
   mic: {

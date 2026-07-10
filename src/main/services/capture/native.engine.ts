@@ -134,7 +134,12 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
     }
     if (seen.size === 0) return false
     const hits = words.reduce((n, w) => (seen.has(w) ? n + 1 : n), 0)
-    return hits / words.length >= ECHO_OVERLAP
+    const ratio = hits / words.length
+    // Regla principal: mayormente eco. Regla secundaria (turnos MIXTOS, QA 7:
+    // "mi frase" + eco pegado en el mismo turno diluía el ratio a ~0.6): una
+    // coincidencia ABSOLUTA alta con ratio moderado también es eco — que 8+
+    // palabras de contenido calquen lo del sistema no pasa por azar.
+    return ratio >= ECHO_OVERLAP || (ratio >= 0.5 && hits >= 8)
   }
 
   /**
@@ -258,6 +263,13 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
     }
   }
 
+  // Reintentos de respawn del helper en esta sesión. El helper es MUY
+  // superior al fallback (AEC3 + gate + audio de sistema); un crash puntual
+  // no debe degradar la sesión entera a mic-sin-AEC. Granola hace lo mismo
+  // (reinician su audio_process; flags system_audio_dropout_restart y
+  // max_memory_restart en su config).
+  private helperRespawns = 0
+
   private onHelperGone(reason: string): void {
     console.error('[native] helper de audio caído:', reason)
     this.helper = null
@@ -265,6 +277,14 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
     // en pausa — encender el mic con la UI en "pausa" sería un bug de
     // confianza). El resume respawnea un helper limpio.
     if (this.paused) return
+    if (this.helperRespawns < 2) {
+      this.helperRespawns += 1
+      console.warn(`[native] respawneando helper (intento ${this.helperRespawns}/2)`)
+      this.spawnHelper()
+      return
+    }
+    // Crashes repetidos: recién ahí degradar al mic del renderer (sin AEC),
+    // que al menos mantiene la sesión viva.
     void this.them.stop()
     this.fallbackToRendererMic(
       'System audio stopped — check System Audio Recording permission. Your microphone keeps working.',

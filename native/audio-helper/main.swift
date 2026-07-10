@@ -948,9 +948,13 @@ if micMode == "auhal" {
             guard apmHandle != nil, !paused else { continue }
             let frameSize = apmRenderFrame
             guard frameSize > 0 else { continue }
+            // OJO: last se escribe desde el hilo del IOProc; si un frame real
+            // llega entre leer `now` y leer `last`, last > now y `now - last`
+            // en UInt64 DESBORDA → trap de Swift (crash real visto en QA:
+            // SIGTRAP en este hilo con video activo). Comparar antes de restar.
             let now = DispatchTime.now().uptimeNanoseconds
             let last = lastRenderFeedNs
-            guard last > 0, now - last > 100_000_000 else { continue }
+            guard last > 0, now > last, now - last > 100_000_000 else { continue }
             if zeroFrame.count != frameSize {
                 zeroFrame = [Int16](repeating: 0, count: frameSize)
             }

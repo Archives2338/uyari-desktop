@@ -10,16 +10,19 @@ function SideItem({
   label,
   active,
   indent,
+  onClick,
 }: {
   icon: ReactNode
   label: string
   active?: boolean
   indent?: boolean
+  onClick?: () => void
 }): React.JSX.Element {
   const [hover, hoverProps] = useHover()
   return (
     <div
       {...hoverProps}
+      onClick={onClick}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -27,7 +30,7 @@ function SideItem({
         padding: '7px 10px',
         marginLeft: indent ? 14 : 0,
         borderRadius: 'var(--radius-sm)',
-        cursor: 'pointer',
+        cursor: onClick ? 'pointer' : 'default',
         background: active ? 'var(--surface-sunken)' : hover ? 'var(--violet-wash)' : 'transparent',
         font: 'var(--text-sm)',
         fontWeight: 500,
@@ -46,11 +49,15 @@ export function Sidebar({
   workspace,
   wsColorId,
   active = 'home',
+  onHome,
+  onAsk,
 }: {
   workspace: string
   wsColorId: string
-  /** Qué ítem de nav está activo. Solo "home" tiene destino hoy. */
+  /** Qué ítem de nav está activo. "Shared" no tiene destino todavía. */
   active?: 'home' | 'shared' | 'ask'
+  onHome?: () => void
+  onAsk?: () => void
 }): React.JSX.Element {
   const initial = (workspace || 'U').trim().charAt(0).toUpperCase()
   const ws = WS_COLORS.find((c) => c.id === wsColorId) ?? WS_COLORS[0]
@@ -60,6 +67,7 @@ export function Sidebar({
       style={{
         width: 230,
         flexShrink: 0,
+        background: 'var(--sidebar)',
         borderRight: '1px solid var(--border)',
         display: 'flex',
         flexDirection: 'column',
@@ -89,6 +97,7 @@ export function Sidebar({
         icon={i('M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5')}
         label={S.home.nav.home}
         active={active === 'home'}
+        onClick={onHome}
       />
       <SideItem
         icon={i([
@@ -104,6 +113,7 @@ export function Sidebar({
         icon={i('M8 12a8 7 0 1 1 4 6.2L7 20l.8-3.4A8 7 0 0 1 8 12z')}
         label={S.home.nav.ask}
         active={active === 'ask'}
+        onClick={onAsk}
       />
       <div
         style={{

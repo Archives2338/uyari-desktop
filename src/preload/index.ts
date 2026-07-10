@@ -36,6 +36,7 @@ const bridge: UyariBridge = {
     get: (clientSessionId) => ipcRenderer.invoke(IPC.meetingsGet, clientSessionId),
     ask: (clientSessionId, question) =>
       ipcRenderer.invoke(IPC.meetingsAsk, clientSessionId, question),
+    askAll: (question, meetingIds) => ipcRenderer.invoke(IPC.meetingsAskAll, question, meetingIds),
     share: (clientSessionId) => ipcRenderer.invoke(IPC.meetingsShare, clientSessionId),
   },
   mic: {
@@ -50,6 +51,7 @@ const bridge: UyariBridge = {
     dragStart: () => ipcRenderer.send(IPC.overlayDrag, 'start'),
     dragEnd: () => ipcRenderer.send(IPC.overlayDrag, 'end'),
     focusMain: () => ipcRenderer.send(IPC.overlayFocusMain),
+    openAsk: () => ipcRenderer.send(IPC.overlayOpenAsk),
   },
   events: {
     onCaption: subscribe<CaptionSegment>(IPC.evCaption),
@@ -57,6 +59,7 @@ const bridge: UyariBridge = {
     onMicControl: subscribe<MicControlCmd>(IPC.evMicControl),
     onMeetingDetected: subscribe<{ label: string }>(IPC.evMeetingDetected),
     onNubExpanded: subscribe<boolean>(IPC.evNubExpanded),
+    onOpenAsk: subscribe<void>(IPC.evOpenAsk),
   },
 }
 

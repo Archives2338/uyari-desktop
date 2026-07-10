@@ -1,4 +1,5 @@
 import type {
+  AskAllResponse,
   CaptionSegment,
   MeetingDetailData,
   MeetingListPage,
@@ -150,6 +151,14 @@ export class ApiClient {
     return this.request(`/meetings/${clientSessionId}/ask`, {
       method: 'POST',
       body: JSON.stringify({ question }),
+    })
+  }
+
+  /** Chat global ("Pregúntale a Uyari"): contra el historial, con citas. */
+  askAll(question: string, meetingIds?: string[]): Promise<AskAllResponse> {
+    return this.request('/meetings/ask', {
+      method: 'POST',
+      body: JSON.stringify({ question, meetingIds }),
     })
   }
 

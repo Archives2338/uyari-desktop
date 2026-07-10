@@ -511,7 +511,6 @@ body {
 
 /* Home: historial de reuniones pasadas (quick win #2). */
 .home-meetings {
-  margin-top: 32px;
   display: flex;
   flex-direction: column;
 }
@@ -534,12 +533,12 @@ body {
 }
 
 .home-meeting-icon {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   flex-shrink: 0;
-  border-radius: 9px;
+  border-radius: 8px;
   background: var(--surface-sunken);
-  color: var(--ink-3);
+  color: var(--accent-strong);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -803,4 +802,168 @@ body {
 
 .detail-ask-input::placeholder {
   color: var(--ink-4);
+}
+
+/* "Pregúntale a Uyari" — módulo de chat global (CH1 home + CH2 conversación). */
+.ask-textarea {
+  width: 100%;
+  resize: none;
+  background: none;
+  border: none;
+  outline: none;
+  font: var(--text-md);
+  color: var(--ink);
+  padding: 4px 2px;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.ask-textarea::placeholder {
+  color: var(--ink-4);
+}
+
+.ask-scope-select {
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--ink-2);
+  font: var(--text-xs);
+  font-weight: 500;
+  padding: 6px 10px;
+  cursor: pointer;
+  max-width: 180px;
+}
+
+.ask-send-btn {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: none;
+  background: var(--violet);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.ask-send-btn:disabled {
+  background: var(--surface-sunken);
+  color: var(--ink-4);
+  cursor: default;
+}
+
+.ask-recent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.ask-recent-row:hover {
+  background: var(--violet-wash);
+}
+
+.ask-recent-row:first-child {
+  border-top: 1px solid var(--border);
+}
+
+.ask-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 8px 14px;
+  font: var(--text-xs);
+  font-weight: 500;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.ask-chip:hover {
+  background: var(--violet-wash);
+  border-color: var(--violet-soft);
+  color: var(--text-heading);
+}
+
+.ask-chip svg {
+  color: var(--accent-strong);
+}
+
+/* Pregunta del usuario: tostado/sidebar-tone, nunca violeta — el usuario
+   es neutro (regla del handoff). */
+.ask-question-bubble {
+  align-self: flex-end;
+  max-width: 78%;
+  background: var(--sidebar);
+  border: 1px solid var(--border);
+  color: var(--text-heading);
+  font: var(--text-sm);
+  line-height: 1.5;
+  border-radius: 16px 16px 4px 16px;
+  padding: 10px 16px;
+}
+
+.ask-citation-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 10px 12px;
+}
+
+.ask-citation-open {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: var(--label-sm);
+  font-size: 12px;
+  color: var(--accent-strong);
+  padding: 0;
+  white-space: nowrap;
+}
+
+.ask-citation-open:hover {
+  text-decoration: underline;
+}
+
+.ask-answer-action {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: var(--text-xs);
+  color: var(--ink-4);
+  padding: 0;
+}
+
+.ask-answer-action:hover {
+  color: var(--text-heading);
+}
+
+.ask-history-row {
+  padding: 7px 8px;
+  border-radius: var(--radius-sm);
+  font: var(--text-sm);
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ask-history-row:hover {
+  background: var(--violet-wash);
+}
+
+.ask-history-row-active {
+  background: var(--surface-sunken);
+  color: var(--text-heading);
 }

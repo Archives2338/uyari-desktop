@@ -25,6 +25,7 @@ interface QaEntry {
 
 export function MeetingDetail({ clientSessionId }: { clientSessionId: string }): React.JSX.Element {
   const closeMeeting = useApp((s) => s.closeMeeting)
+  const openAsk = useApp((s) => s.openAsk)
   const flow = useMemo(loadFlow, [])
 
   const [meeting, setMeeting] = useState<MeetingDetailData | null>(null)
@@ -107,7 +108,13 @@ export function MeetingDetail({ clientSessionId }: { clientSessionId: string }):
 
   return (
     <div style={{ flex: 1, display: 'flex', minHeight: 0, height: '100%' }}>
-      <Sidebar workspace={flow.workspace} wsColorId={flow.wsColor} active="home" />
+      <Sidebar
+        workspace={flow.workspace}
+        wsColorId={flow.wsColor}
+        active="home"
+        onHome={closeMeeting}
+        onAsk={openAsk}
+      />
       <main style={{ flex: 1, overflowY: 'auto', padding: '20px 40px 48px' }}>
         <div style={{ maxWidth: 680, margin: '0 auto' }}>
           <button className="detail-back" onClick={closeMeeting}>

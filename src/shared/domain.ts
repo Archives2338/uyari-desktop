@@ -101,3 +101,17 @@ export interface MeetingListPage {
   items: MeetingListItem[]
   nextCursor: string | null
 }
+
+// "Pregúntale a Uyari" global (chat, no ligado a una reunión abierta).
+export interface AskAllCitation {
+  clientSessionId: string
+  title: string | null
+  occurredAt: string
+  actionItems: string[]
+}
+
+export interface AskAllResponse {
+  answer: string
+  citations: AskAllCitation[]
+  followUps: string[]
+}

@@ -16,8 +16,7 @@ import appIcon from '@renderer/assets/uyari-app-icon-macos.svg'
 // TODAS las ventanas — cero lógica nueva.
 //
 // El ask bar no responde inline (el nub no tiene espacio para un chat):
-// cualquier tap abre/enfoca la ventana principal — ahí vivirá "Ask Uyari"
-// cuando exista esa pantalla.
+// cualquier tap abre la ventana principal directo en "Pregúntale a Uyari".
 //
 // La ventana existe solo durante una sesión: si está montada, hay sesión.
 
@@ -67,7 +66,7 @@ export function OverlayPill(): React.JSX.Element {
   const preparingMic = session.status === 'starting'
   const paused = session.status === 'paused'
   const dim = reconnecting || paused // punto ámbar: no está grabando en vivo
-  const openApp = (): void => window.uyari.overlay.focusMain()
+  const openApp = (): void => window.uyari.overlay.openAsk()
 
   return (
     <div className="nub">

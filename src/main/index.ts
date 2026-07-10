@@ -112,11 +112,33 @@ if (!app.requestSingleInstanceLock()) {
       }
     }
 
+    // El "Pregúntale a Uyari" del nub no responde inline (sin espacio para
+    // un chat): trae la ventana principal al frente y la navega al módulo
+    // de chat. Si la ventana no existe todavía, espera a que el renderer
+    // termine de cargar antes de mandar el evento — un send() a una página
+    // recién creada se pierde (nadie está escuchando aún).
+    const focusMainAndOpenAsk = (): void => {
+      const win = BrowserWindow.getAllWindows().find(isMainWin)
+      if (win) {
+        if (win.isMinimized()) win.restore()
+        win.show()
+        win.focus()
+        win.webContents.send(IPC.evOpenAsk)
+      } else {
+        const fresh = spawnMainWindow()
+        fresh.webContents.once('did-finish-load', () => fresh.webContents.send(IPC.evOpenAsk))
+      }
+    }
+
     registerIpc({
       settings,
       api,
       meetings,
-      overlay: { drag: (action) => nub?.drag(action), focusMain: focusMainWindow },
+      overlay: {
+        drag: (action) => nub?.drag(action),
+        focusMain: focusMainWindow,
+        openAsk: focusMainAndOpenAsk,
+      },
     })
 
     // Reuniones que quedaron a medias en una corrida anterior (crash o

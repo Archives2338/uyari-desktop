@@ -6,6 +6,7 @@ import { OnboardingFlow } from '@renderer/onboarding/Flow'
 import { loadFlow } from '@renderer/onboarding/state'
 import { Home } from '@renderer/screens/Home'
 import { MeetingDetail } from '@renderer/screens/MeetingDetail'
+import { AskUyari } from '@renderer/screens/AskUyari'
 import { OverlayPill } from '@renderer/screens/OverlayPill'
 import { DetectionBanner } from '@renderer/screens/DetectionBanner'
 
@@ -46,6 +47,8 @@ function MainApp(): React.JSX.Element {
     setSession,
     setDetectedMeeting,
     openMeetingId,
+    askOpen,
+    openAsk,
   } = useApp()
   const [ready, setReady] = useState(false)
   const [onboarded, setOnboarded] = useState(() => !FORCE_ONBOARDING && loadFlow().done)
@@ -57,6 +60,7 @@ function MainApp(): React.JSX.Element {
     const offDetected = window.uyari.events.onMeetingDetected(({ label }) =>
       setDetectedMeeting(label),
     )
+    const offOpenAsk = window.uyari.events.onOpenAsk(openAsk)
     const offMic = window.uyari.events.onMicControl((cmd) => {
       window.uyari.mic.log(`control recibido: ${cmd.action}`)
       if (cmd.action === 'start') {
@@ -78,10 +82,11 @@ function MainApp(): React.JSX.Element {
       offSession()
       offMic()
       offDetected()
+      offOpenAsk()
       window.removeEventListener('online', notifyOnline)
       window.removeEventListener('offline', notifyOffline)
     }
-  }, [refreshAuth, refreshPermissions, pushCaption, setSession, setDetectedMeeting])
+  }, [refreshAuth, refreshPermissions, pushCaption, setSession, setDetectedMeeting, openAsk])
 
   const showOnboarding = !auth.loggedIn || !onboarded
 
@@ -100,6 +105,8 @@ function MainApp(): React.JSX.Element {
         </div>
       ) : openMeetingId ? (
         <MeetingDetail key={openMeetingId} clientSessionId={openMeetingId} />
+      ) : askOpen ? (
+        <AskUyari />
       ) : (
         <Home />
       )}

@@ -9,18 +9,23 @@
 
 struct ApmHandle {
   rtc::scoped_refptr<webrtc::AudioProcessing> apm;
-  webrtc::StreamConfig config;
+  webrtc::StreamConfig renderConfig;
+  webrtc::StreamConfig captureConfig;
   std::atomic<bool> bypass{false};
 };
 
+namespace {
+bool supportedRate(int hz) {
+  return hz == 8000 || hz == 16000 || hz == 32000 || hz == 48000;
+}
+} // namespace
+
 extern "C" {
 
-ApmHandle* apm_create(int sample_rate_hz) {
-  // El APM trabaja nativamente a 8/16/32/48 kHz. Uyari usa 16 kHz (lo que
-  // consume el STT); otras rates son error de programación, no un caso a
-  // adaptar en silencio.
-  if (sample_rate_hz != 8000 && sample_rate_hz != 16000 &&
-      sample_rate_hz != 32000 && sample_rate_hz != 48000) {
+ApmHandle* apm_create(int render_rate_hz, int capture_rate_hz) {
+  // El APM (interfaz int16) trabaja nativamente a 8/16/32/48 kHz. Otras
+  // rates son responsabilidad del caller (caer a la ruta de 16 kHz).
+  if (!supportedRate(render_rate_hz) || !supportedRate(capture_rate_hz)) {
     return nullptr;
   }
 
@@ -41,12 +46,17 @@ ApmHandle* apm_create(int sample_rate_hz) {
 
   auto* h = new ApmHandle();
   h->apm = std::move(apm);
-  h->config = webrtc::StreamConfig(sample_rate_hz, 1);
+  h->renderConfig = webrtc::StreamConfig(render_rate_hz, 1);
+  h->captureConfig = webrtc::StreamConfig(capture_rate_hz, 1);
   return h;
 }
 
-int apm_frame_samples(const ApmHandle* h) {
-  return static_cast<int>(h->config.num_frames());
+int apm_render_frame_samples(const ApmHandle* h) {
+  return static_cast<int>(h->renderConfig.num_frames());
+}
+
+int apm_capture_frame_samples(const ApmHandle* h) {
+  return static_cast<int>(h->captureConfig.num_frames());
 }
 
 int apm_process_render(ApmHandle* h, const int16_t* frame) {
@@ -55,13 +65,15 @@ int apm_process_render(ApmHandle* h, const int16_t* frame) {
   // nosotros, así que se escribe a un scratch local (no thread-shared: esta
   // función se llama desde un solo hilo, ver header).
   static thread_local int16_t scratch[480]; // 10 ms a 48 kHz, la rate máxima
-  return h->apm->ProcessReverseStream(frame, h->config, h->config, scratch);
+  return h->apm->ProcessReverseStream(frame, h->renderConfig, h->renderConfig,
+                                      scratch);
 }
 
 int apm_process_capture(ApmHandle* h, int16_t* frame) {
   if (h->bypass.load(std::memory_order_relaxed)) return 0;
   // In-place: src == dest está soportado por el APM.
-  return h->apm->ProcessStream(frame, h->config, h->config, frame);
+  return h->apm->ProcessStream(frame, h->captureConfig, h->captureConfig,
+                               frame);
 }
 
 void apm_set_bypass(ApmHandle* h, int bypass) {

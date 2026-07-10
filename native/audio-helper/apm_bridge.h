@@ -31,11 +31,18 @@ extern "C" {
 typedef struct ApmHandle ApmHandle;
 
 // Crea el APM con AEC3 habilitado (+ high-pass filter; sin NS/AGC — se
-// evalúan después, ver plan). Devuelve NULL si la rate no es soportada.
-ApmHandle* apm_create(int sample_rate_hz);
+// evalúan después, ver plan). Render y capture pueden ir a rates DISTINTAS
+// (el APM resamplea internamente): se procesa a la rate NATIVA de cada
+// dispositivo, ANTES de nuestro downsample a 16 kHz — el downsampler lineal
+// sin anti-aliasing pliega el espectro (aliasing) de forma diferente en la
+// referencia digital y en el eco acústico, y eso el filtro lineal del AEC
+// no lo puede modelar. Devuelve NULL si alguna rate no es soportada
+// (soportadas: 8/16/32/48 kHz).
+ApmHandle* apm_create(int render_rate_hz, int capture_rate_hz);
 
-// Samples por frame de 10 ms a la rate del handle (160 a 16 kHz).
-int apm_frame_samples(const ApmHandle* h);
+// Samples por frame de 10 ms de cada stream (480 a 48 kHz, 160 a 16 kHz).
+int apm_render_frame_samples(const ApmHandle* h);
+int apm_capture_frame_samples(const ApmHandle* h);
 
 // Far-end: un frame de 10 ms del audio del sistema (mono int16).
 // Devuelve 0 si ok, código de error del APM si no.

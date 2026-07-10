@@ -261,18 +261,36 @@ final class FrameChunker {
     }
 }
 
-let APM_FRAME = Int(TARGET_RATE) / 100 // 10 ms a 16 kHz = 160 samples
+// El APM se crea en startMicAuhal(), cuando se conocen las rates REALES de
+// ambos streams: el AEC corre a la rate NATIVA de cada dispositivo (48 kHz
+// típico), ANTES de nuestro downsample a 16 kHz. Motivo: el downsampler
+// lineal no tiene filtro anti-aliasing — al bajar 48k→16k el contenido de
+// 8-16 kHz se pliega, y se pliega DISTINTO en la referencia digital que en
+// el eco que pasó por parlante+aire+mic; esa diferencia es imposible de
+// modelar para el filtro lineal del AEC (cancelación pobre). A rate nativa
+// no hay plegado y el AEC ve el espectro completo.
 var apmHandle: OpaquePointer? = nil
-let micChunker = FrameChunker(frame: APM_FRAME)
-let renderChunker = FrameChunker(frame: APM_FRAME)
+var apmCaptureRate = 0
+var micChunker: FrameChunker? = nil
+var renderChunker: FrameChunker? = nil
+// Diagnóstico: el primer error de cada lado del APM se loguea una vez (un
+// error persistente = ese stream NO se está procesando).
+var apmRenderErrLogged = false
+var apmCaptureErrLogged = false
 
-if micMode == "auhal" {
-    apmHandle = apm_create(Int32(TARGET_RATE))
-    if apmHandle == nil {
-        log("AEC3: apm_create falló — el mic irá CRUDO, sin cancelación de eco")
-    } else {
-        log("AEC3: APM creado (frames de \(APM_FRAME) samples)")
+func floatsToInt16(_ input: [Float]) -> [Int16] {
+    var out = [Int16](repeating: 0, count: input.count)
+    for i in 0..<input.count {
+        let clamped = max(-1, min(1, input[i]))
+        out[i] = Int16(clamped < 0 ? clamped * 32768 : clamped * 32767)
     }
+    return out
+}
+
+func int16ToFloats(_ input: [Int16]) -> [Float] {
+    var out = [Float](repeating: 0, count: input.count)
+    for i in 0..<input.count { out[i] = Float(input[i]) / 32768 }
+    return out
 }
 
 // ============================================================
@@ -367,19 +385,27 @@ let ioStatus = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, nil) {
             mono.append(sum / Float(channels))
         }
     }
+    // Far-end del AEC3: lo que suena por los parlantes es la referencia que
+    // se resta del mic. Se alimenta CRUDO a la rate nativa del tap (sin el
+    // downsample a 16k, que mete aliasing — ver la sección AEC3).
+    if let apm = apmHandle, let chunker = renderChunker {
+        let ints = floatsToInt16(mono)
+        _ = chunker.drain(ints) { frame in
+            frame.withUnsafeMutableBufferPointer {
+                let status = apm_process_render(apm, $0.baseAddress)
+                if status != 0 && !apmRenderErrLogged {
+                    apmRenderErrLogged = true
+                    log("AEC3: process_render devolvió \(status) — el far-end NO se está procesando")
+                }
+            }
+        }
+    }
+    // El canal "Them" del STT recibe el audio tal cual (el AEC solo toca el mic).
     let pcm = systemDownsampler.process(mono)
     if !pcm.isEmpty {
         if firstSystemFrame {
             firstSystemFrame = false
             log("canal sistema: primer frame emitido")
-        }
-        // Far-end del AEC3: lo que suena por los parlantes es la referencia
-        // que se resta del mic. Se alimenta ANTES de emitir; el canal "Them"
-        // del STT recibe el audio tal cual (el AEC solo toca el mic).
-        if let apm = apmHandle {
-            _ = renderChunker.drain(pcm) { frame in
-                frame.withUnsafeMutableBufferPointer { _ = apm_process_render(apm, $0.baseAddress) }
-            }
         }
         writer.append(channel: CHANNEL_SYSTEM, samples: pcm)
     }
@@ -500,25 +526,33 @@ let auhalInputProc: AURenderCallback = { _, ioActionFlags, inTimeStamp, inBusNum
     let frames = Int(inNumberFrames)
     let mono = Array(UnsafeBufferPointer(start: auhalRenderMem, count: frames))
     for s in mono where abs(s) > micPeak { micPeak = abs(s) }
-    if let pcm = auhalDownsampler?.process(mono), !pcm.isEmpty {
-        // Near-end del AEC3: cancela in-place el eco de los parlantes usando
-        // el far-end que alimenta el IOProc del sistema. Sin APM (creación
-        // fallida) el mic va crudo — degradación visible en el log, no muda.
-        let emitted: [Int16]
-        if let apm = apmHandle {
-            emitted = micChunker.drain(pcm) { frame in
-                frame.withUnsafeMutableBufferPointer { _ = apm_process_capture(apm, $0.baseAddress) }
+
+    // Near-end del AEC3: cancela el eco A LA RATE NATIVA del dispositivo
+    // (antes del downsample, ver sección AEC3); el audio ya limpio baja a
+    // 16 kHz para el STT. Sin APM (rate rara / creación fallida) va crudo —
+    // degradación visible en el log, nunca mudo.
+    let source: [Float]
+    if let apm = apmHandle, let chunker = micChunker {
+        let processed = chunker.drain(floatsToInt16(mono)) { frame in
+            frame.withUnsafeMutableBufferPointer {
+                let status = apm_process_capture(apm, $0.baseAddress)
+                if status != 0 && !apmCaptureErrLogged {
+                    apmCaptureErrLogged = true
+                    log("AEC3: process_capture devolvió \(status) — el mic NO se está procesando")
+                }
             }
-        } else {
-            emitted = pcm
         }
-        if !emitted.isEmpty {
-            if firstMicFrame {
-                firstMicFrame = false
-                log("canal mic: primer frame emitido")
-            }
-            writer.append(channel: CHANNEL_MIC, samples: emitted)
+        if processed.isEmpty { return noErr } // el chunker acumula; nada que emitir aún
+        source = int16ToFloats(processed)
+    } else {
+        source = mono
+    }
+    if let pcm = auhalDownsampler?.process(source), !pcm.isEmpty {
+        if firstMicFrame {
+            firstMicFrame = false
+            log("canal mic: primer frame emitido")
         }
+        writer.append(channel: CHANNEL_MIC, samples: pcm)
     }
     return noErr
 }
@@ -638,6 +672,28 @@ func startMicAuhal() -> Bool {
     }
     log("AUHAL: inicializado, arrancando IO…")
 
+    // (Re)crear el APM con las rates NATIVAS reales: tap (render) + este
+    // dispositivo (capture). Solo cambia si el device nuevo trae otra rate.
+    if apmHandle == nil || apmCaptureRate != Int(rate) {
+        if let old = apmHandle {
+            apmHandle = nil
+            usleep(20_000) // dejar salir a los callbacks en vuelo
+            apm_destroy(old)
+        }
+        apmHandle = apm_create(Int32(systemRate), Int32(rate))
+        if let apm = apmHandle {
+            micChunker = FrameChunker(frame: Int(apm_capture_frame_samples(apm)))
+            renderChunker = FrameChunker(frame: Int(apm_render_frame_samples(apm)))
+            apmCaptureRate = Int(rate)
+            log("AEC3: APM creado (render \(Int(systemRate)) Hz / capture \(Int(rate)) Hz, nativo)")
+        } else {
+            micChunker = nil
+            renderChunker = nil
+            apmCaptureRate = 0
+            log("AEC3: rate no soportada (\(Int(systemRate))/\(Int(rate))) — mic CRUDO sin AEC")
+        }
+    }
+
     auhalDownsampler = Downsampler(sourceRate: rate)
     auhalUnit = unit
 
@@ -730,10 +786,14 @@ func updateAecBypass() {
     guard let apm = apmHandle else { return }
     let forcedOff = ProcessInfo.processInfo.environment["UYARI_AEC"] == "off"
     let bypass = forcedOff || outputLikelyHeadphones()
-    guard bypass != aecBypassed else { return }
-    aecBypassed = bypass
+    // Aplicar SIEMPRE (es un store atómico barato): si el APM se recreó por
+    // un cambio de dispositivo, su bypass interno nace en false aunque
+    // aecBypassed diga otra cosa. Loguear solo el cambio.
     apm_set_bypass(apm, bypass ? 1 : 0)
-    log("AEC3: \(bypass ? "BYPASS (\(forcedOff ? "forzado por UYARI_AEC=off" : "auriculares"))" : "ACTIVO (parlantes)")")
+    if bypass != aecBypassed {
+        aecBypassed = bypass
+        log("AEC3: \(bypass ? "BYPASS (\(forcedOff ? "forzado por UYARI_AEC=off" : "auriculares"))" : "ACTIVO (parlantes)")")
+    }
 }
 
 // --- Arranque del canal mic según el modo ---

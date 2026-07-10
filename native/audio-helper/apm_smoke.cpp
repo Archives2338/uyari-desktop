@@ -31,12 +31,12 @@ double energy(const int16_t* s, int n) {
 } // namespace
 
 int main() {
-  ApmHandle* apm = apm_create(kRate);
+  ApmHandle* apm = apm_create(kRate, kRate);
   if (!apm) {
     fprintf(stderr, "FALLA: apm_create devolvió NULL\n");
     return 1;
   }
-  const int frame = apm_frame_samples(apm);
+  const int frame = apm_capture_frame_samples(apm);
   printf("APM creado: %d Hz, frame de %d samples (10 ms)\n", kRate, frame);
 
   // Far-end completo por adelantado: ruido blanco determinístico a -12 dBFS.

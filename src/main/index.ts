@@ -19,6 +19,14 @@ import { createCaptureEngine } from './services/capture'
 // Composition root: aquí (y solo aquí) se construyen y cablean los
 // servicios. El resto del main recibe dependencias por constructor.
 
+// En DEV, Chromium cifra su archivo Cookies con la clave "uyari-desktop
+// Safe Storage" del llavero → prompt de contraseña en cada arranque (el
+// binario Electron de node_modules no tiene firma estable, macOS no puede
+// recordar el permiso). Mock keychain = cero prompts; no usamos cookies
+// para nada sensible en dev. En la app firmada el prompt sale UNA vez y
+// macOS lo recuerda (igual que Granola).
+if (!app.isPackaged) app.commandLine.appendSwitch('use-mock-keychain')
+
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {

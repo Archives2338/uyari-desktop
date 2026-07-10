@@ -111,13 +111,15 @@ ApmHandle* apm_create(int render_rate_hz, int capture_rate_hz) {
   config.echo_canceller.mobile_mode = false; // AEC3 completo, no AECM
   config.high_pass_filter.enabled = true;
   config.gain_controller1.enabled = false;
-  config.gain_controller2.enabled = false;
-  // NS encima del AEC: el residuo que sobrevive al filtro lineal viene en
-  // gran parte de la NO-linealidad del parlante (armónicos que el AEC no
-  // puede modelar) — el supresor de ruido lo trata como ruido y lo limpia.
-  // Granola no lo usa (tunean su EC3Config, valores ilegibles); para
-  // transcripción el trade-off (voz levemente procesada vs eco transcrito)
-  // favorece NS. Desactivable junto al tuning con UYARI_AEC_TUNING=default.
+  // AGC (gain_controller2, control digital adaptativo): Granola lo pasa como
+  // `enableAutomaticGainCompensation` al módulo nativo (confirmado en su
+  // audio_process desminificado). Normaliza el nivel del mic DESPUÉS del AEC,
+  // lo que ayuda a que el residuo de eco quede parejo/predecible y a que la
+  // voz del usuario no varíe. Desactivable con UYARI_AGC=off para A/B.
+  const char* agc = std::getenv("UYARI_AGC");
+  const bool agcOn = !(agc && std::string_view(agc) == "off");
+  config.gain_controller2.enabled = agcOn;
+  config.gain_controller2.adaptive_digital.enabled = agcOn;
   config.noise_suppression.enabled = false;
   apm->ApplyConfig(config);
 

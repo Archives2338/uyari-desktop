@@ -63,13 +63,15 @@ ApmHandle* apm_create(int render_rate_hz, int capture_rate_hz) {
   config.echo_canceller.mobile_mode = false; // AEC3 completo, no AECM
   config.high_pass_filter.enabled = true;
   config.gain_controller1.enabled = false;
-  // AGC (gain_controller2, control digital adaptativo): Granola lo pasa como
-  // `enableAutomaticGainCompensation` al módulo nativo (confirmado en su
-  // audio_process desminificado). Normaliza el nivel del mic DESPUÉS del AEC,
-  // lo que ayuda a que el residuo de eco quede parejo/predecible y a que la
-  // voz del usuario no varíe. Desactivable con UYARI_AGC=off para A/B.
+  // AGC (gain_controller2 adaptativo): Granola lo usa, pero para NUESTRO caso
+  // (fuga de eco) PERJUDICA — aplica ganancia DESPUÉS del AEC y amplifica el
+  // eco residual hacia el rango que el STT transcribe (medido: con alineación
+  // por timestamp la cancelación da 23.8 dB sin AGC vs 11 dB aparentes con
+  // AGC, que era artefacto de la amplificación). OFF por defecto; UYARI_AGC=on
+  // para experimentar. Granola puede permitírselo porque su AEC deja residuo
+  // negligible; el nuestro todavía no.
   const char* agc = std::getenv("UYARI_AGC");
-  const bool agcOn = !(agc && std::string_view(agc) == "off");
+  const bool agcOn = agc && std::string_view(agc) == "on";
   config.gain_controller2.enabled = agcOn;
   config.gain_controller2.adaptive_digital.enabled = agcOn;
   config.noise_suppression.enabled = false;

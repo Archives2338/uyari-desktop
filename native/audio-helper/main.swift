@@ -228,38 +228,18 @@ final class Downsampler {
 // Solo existe en modo UYARI_MIC=auhal (el modo vp usa la AEC de Apple).
 // ============================================================
 
-// Modo de captura del mic: "auhal" (crudo + AEC3 propio) | "vp" (default,
-// AVAudioEngine + voice processing de Apple).
-let micMode = ProcessInfo.processInfo.environment["UYARI_MIC"] ?? "vp"
-
-// El APM procesa frames de 10 ms exactos (160 samples a 16 kHz). Este
-// acumulador convierte el goteo de tamaño variable del Downsampler en
-// frames completos para el APM.
-final class FrameChunker {
-    private var buf: [Int16] = []
-    private let frame: Int
-
-    init(frame: Int) {
-        self.frame = frame
-    }
-
-    /// Acumula `input`; por cada frame COMPLETO llama `process` (in-place) y
-    /// devuelve todo lo procesado. El residuo queda para la próxima llamada.
-    func drain(_ input: [Int16], process: (inout [Int16]) -> Void) -> [Int16] {
-        buf.append(contentsOf: input)
-        let frames = buf.count / frame
-        guard frames > 0 else { return [] }
-        var out = [Int16]()
-        out.reserveCapacity(frames * frame)
-        for i in 0..<frames {
-            var chunk = Array(buf[(i * frame)..<((i + 1) * frame)])
-            process(&chunk)
-            out.append(contentsOf: chunk)
-        }
-        buf = Array(buf[(frames * frame)...])
-        return out
-    }
-}
+// Modo de captura del mic:
+//   "auto"  (default) → HÍBRIDO: se decide al arrancar según la salida de
+//           audio — auriculares → auhal (sin eco físico: arranque 200ms,
+//           inmune al bug de arbitraje VP, indicador se apaga en pausa);
+//           parlantes → vp (la AEC de Apple sigue siendo la mejor opción
+//           disponible para cancelar parlantes; nuestro AEC3 propio queda
+//           para cuando cierre la brecha en ese caso).
+//   "auhal" → forzar mic crudo + AEC3 propio.
+//   "vp"    → forzar AVAudioEngine + voice processing de Apple.
+// Se resuelve en el arranque (ver dispatcher); var porque "auto" se
+// reemplaza por el modo elegido.
+var micMode = ProcessInfo.processInfo.environment["UYARI_MIC"] ?? "auto"
 
 // El APM se crea en startMicAuhal(), cuando se conocen las rates REALES de
 // ambos streams: el AEC corre a la rate NATIVA de cada dispositivo (48 kHz
@@ -272,56 +252,14 @@ final class FrameChunker {
 var apmHandle: OpaquePointer? = nil
 var apmCaptureRate = 0
 var apmRenderFrame = 0 // samples por frame de render (480 a 48 kHz)
-var micChunker: FrameChunker? = nil
-var renderChunker: FrameChunker? = nil
 // Diagnóstico: el primer error de cada lado del APM se loguea una vez (un
 // error persistente = ese stream NO se está procesando).
 var apmRenderErrLogged = false
 var apmCaptureErrLogged = false
-
-// El render del AEC debe ser CONTINUO: un cliente VoIP alimenta el far-end
-// desde el callback de playout, que dispara SIEMPRE (con ceros en el
-// silencio). Nuestro tap solo dispara cuando algo SUENA — sin relleno, el
-// render stream se muere de hambre entre frases, los contadores de muestra
-// render/capture se desalinean y el estimador de delay tiene que
-// re-engancharse en cada inicio de habla (fuga de eco al arrancar frases).
-//
-// Diseño: el IOProc procesa sus frames DIRECTO (la cadencia real del
-// dispositivo es la mejor referencia); un feeder aparte inyecta frames de
-// ceros SOLO cuando hay un hueco real (>100 ms sin frames del tap = silencio
-// del sistema). OJO: NO inyectar ceros entre frames activos — un cero en
-// medio del habla desalinea la referencia y desploma la cancelación
-// (medido: 18 dB → 8.7 dB con un feeder que metía ceros por carrera).
-let renderFeedLock = NSLock()
-var lastRenderFeedNs: UInt64 = 0
-// Pico reciente del render (far-end), para el gate de eco residual. Se
-// decae por frame para reflejar "qué tan fuerte suena el sistema AHORA".
+// Pico reciente del render (far-end) y del mic CRUDO (pre-AEC), con
+// decaimiento, para el gate de eco residual (ver processPair).
 var renderPeakRecent: Int32 = 0
-// Pico reciente del mic CRUDO (pre-AEC), mismo decaimiento: el gate compara
-// la salida del AEC contra esto — si el AEC removió la mayoría, era eco.
 var rawMicPeakRecent: Int32 = 0
-
-func feedRender(_ frame: inout [Int16]) {
-    guard let apm = apmHandle else { return }
-    var peak: Int32 = 0
-    for s in frame {
-        let a = Int32(s.magnitude)
-        if a > peak { peak = a }
-    }
-    renderFeedLock.lock()
-    frame.withUnsafeMutableBufferPointer {
-        let status = apm_process_render(apm, $0.baseAddress)
-        if status != 0 && !apmRenderErrLogged {
-            apmRenderErrLogged = true
-            log("AEC3: process_render devolvió \(status) — el far-end NO se está procesando")
-        }
-    }
-    lastRenderFeedNs = DispatchTime.now().uptimeNanoseconds
-    // Pico con decaimiento (~93%/frame ≈ mitad cada ~90 ms): "cuánto suena
-    // el sistema ahora", robusto a pausas cortas entre sílabas.
-    renderPeakRecent = max(peak, renderPeakRecent - (renderPeakRecent >> 4))
-    renderFeedLock.unlock()
-}
 
 func floatsToInt16(_ input: [Float]) -> [Int16] {
     var out = [Int16](repeating: 0, count: input.count)
@@ -337,6 +275,183 @@ func int16ToFloats(_ input: [Int16]) -> [Float] {
     for i in 0..<input.count { out[i] = Float(input[i]) / 32768 }
     return out
 }
+
+// ============================================================
+// AecAligner — captura ALINEADA POR TIMESTAMP (réplica del
+// deque<TimestampedAudioBuffer> de Granola, confirmado por RE de su binario:
+// -[CombinedAudioCapture processInputBuffer:startTime:fromMicrophone:] usa
+// TimestampedAudioBuffer + SlicedAudioBuffer para alinear mic y sistema).
+//
+// El problema: el AEC3 solo cancela bien si el render (sistema/far-end) y el
+// capture (mic/near-end) llegan ALINEADOS en el tiempo. Con dos callbacks en
+// threads/relojes distintos alimentados en ORDEN DE LLEGADA, el jitter entre
+// ambos limita la convergencia del filtro lineal (~17 dB medido, donde un
+// AEC3 alineado da 30-40 dB).
+//
+// La solución: cada buffer se ubica en una línea de tiempo COMÚN por su
+// mHostTime (reloj mach, compartido entre dispositivos). Un worker tira
+// frames de 10 ms del MISMO instante de ambos anillos y alimenta el AEC en
+// lockstep (render primero, capture después). El playhead lo maneja el mic
+// (que fluye continuo); el sistema se lee como escrito-o-cero (silencio del
+// tap = ceros, sin desincronizar). El margen absorbe el jitter entre threads.
+final class AecAligner {
+    private let rate: Double
+    private let frame: Int
+    private let cap: Int
+    private let margin: Int64
+    private var sys: [Float]
+    private var mic: [Float]
+    private var sysEnd: Int64 = 0
+    private var micEnd: Int64 = 0
+    private var micFirst: Int64 = -1
+    private var haveT0 = false
+    private var t0Nanos: UInt64 = 0
+    private var playhead: Int64 = 0
+    private var started = false
+    private let lock = NSLock()
+    private var worker: Thread?
+    // Recibe cada frame de mic ya LIMPIO (48 kHz float) para downsamplear+STT.
+    var onCleanMic: (([Float]) -> Void)?
+
+    init(rate: Double, frame: Int) {
+        self.rate = rate
+        self.frame = frame
+        self.cap = Int(rate) // 1 s de anillo (holgura enorme vs el margen)
+        self.margin = Int64(frame * 3) // ~30 ms de absorción de jitter
+        self.sys = [Float](repeating: 0, count: cap)
+        self.mic = [Float](repeating: 0, count: cap)
+    }
+
+    private func hostToSample(_ host: UInt64) -> Int64 {
+        let nanos = AudioConvertHostTimeToNanos(host)
+        if !haveT0 {
+            t0Nanos = nanos
+            haveT0 = true
+        }
+        return Int64(Double(Int64(nanos) &- Int64(t0Nanos)) * rate / 1_000_000_000.0)
+    }
+
+    private func write(_ ring: inout [Float], _ end: inout Int64, at start: Int64, _ s: [Float]) {
+        // Reordenamiento raro o salto enorme (pausa): clampear para no barrer
+        // todo el anillo con ceros.
+        var pos = start
+        if start - end > Int64(cap) || start < end - Int64(cap) { end = start }
+        // Rellenar el hueco entre lo escrito y el nuevo start con ceros.
+        while end < start {
+            ring[Int(end % Int64(cap))] = 0
+            end += 1
+        }
+        for (i, v) in s.enumerated() {
+            ring[Int((start + Int64(i)) % Int64(cap))] = v
+        }
+        pos = start + Int64(s.count)
+        if pos > end { end = pos }
+    }
+
+    func pushSystem(_ samples: [Float], hostTime: UInt64) {
+        lock.lock(); defer { lock.unlock() }
+        let start = hostToSample(hostTime)
+        write(&sys, &sysEnd, at: start, samples)
+    }
+
+    func pushMic(_ samples: [Float], hostTime: UInt64) {
+        lock.lock(); defer { lock.unlock() }
+        let start = hostToSample(hostTime)
+        if micFirst < 0 { micFirst = start }
+        write(&mic, &micEnd, at: start, samples)
+    }
+
+    func reset() {
+        lock.lock(); defer { lock.unlock() }
+        sysEnd = 0; micEnd = 0; micFirst = -1; playhead = 0
+        haveT0 = false; started = false
+    }
+
+    func start() {
+        let t = Thread { [self] in
+            while !Thread.current.isCancelled {
+                usleep(5000)
+                var pairs: [(s: [Float], m: [Float])] = []
+                lock.lock()
+                if !started, micFirst >= 0 {
+                    // Arrancar donde el mic empezó (el sistema previo, si lo
+                    // hay, ya está en el anillo; lo que falte se lee como cero).
+                    playhead = micFirst
+                    started = true
+                }
+                if started {
+                    while micEnd - playhead >= Int64(frame) + margin {
+                        var sf = [Float](repeating: 0, count: frame)
+                        var mf = [Float](repeating: 0, count: frame)
+                        for i in 0..<frame {
+                            let p = playhead + Int64(i)
+                            sf[i] = p < sysEnd ? sys[Int(p % Int64(cap))] : 0
+                            mf[i] = mic[Int(p % Int64(cap))]
+                        }
+                        pairs.append((sf, mf))
+                        playhead += Int64(frame)
+                    }
+                }
+                lock.unlock()
+                for pr in pairs { processPair(pr.s, pr.m) }
+            }
+        }
+        t.stackSize = 512 * 1024
+        worker = t
+        t.start()
+    }
+
+    func stop() {
+        worker?.cancel()
+        worker = nil
+    }
+
+    // Procesa un par render/capture ALINEADO por el AEC (fuera del lock — el
+    // trabajo pesado no bloquea a los callbacks de audio). render y capture
+    // corren siempre en ESTE hilo → sin carrera cross-thread en el APM.
+    private func processPair(_ sysF: [Float], _ micF: [Float]) {
+        guard let apm = apmHandle else { onCleanMic?(micF); return }
+        var sysI = floatsToInt16(sysF)
+        var micI = floatsToInt16(micF)
+
+        var rpeak: Int32 = 0
+        for s in sysI where Int32(s.magnitude) > rpeak { rpeak = Int32(s.magnitude) }
+        renderPeakRecent = max(rpeak, renderPeakRecent - (renderPeakRecent >> 4))
+        sysI.withUnsafeMutableBufferPointer {
+            let st = apm_process_render(apm, $0.baseAddress)
+            if st != 0 && !apmRenderErrLogged {
+                apmRenderErrLogged = true
+                log("AEC3: process_render devolvió \(st) — el far-end NO se procesa")
+            }
+        }
+
+        var rawPeak: Int32 = 0
+        for s in micI where Int32(s.magnitude) > rawPeak { rawPeak = Int32(s.magnitude) }
+        rawMicPeakRecent = max(rawPeak, rawMicPeakRecent - (rawMicPeakRecent >> 4))
+        micI.withUnsafeMutableBufferPointer {
+            let st = apm_process_capture(apm, $0.baseAddress)
+            if st != 0 && !apmCaptureErrLogged {
+                apmCaptureErrLogged = true
+                log("AEC3: process_capture devolvió \(st) — el mic NO se procesa")
+            }
+        }
+
+        // GATE de eco residual: si el sistema suena fuerte y el AEC removió
+        // >85% del frame (salida <15% del pico crudo), era eco → a cero. La
+        // voz del usuario en double-talk (ratio 0.3-0.6) pasa. Bypass con
+        // auriculares no actúa.
+        if !aecBypassedNow(), renderPeakRecent > 3000, rawMicPeakRecent > 0 {
+            var fpeak: Int32 = 0
+            for s in micI where Int32(s.magnitude) > fpeak { fpeak = Int32(s.magnitude) }
+            if fpeak < rawMicPeakRecent * 15 / 100 && fpeak < 3000 {
+                for i in 0..<micI.count { micI[i] = 0 }
+            }
+        }
+        onCleanMic?(int16ToFloats(micI))
+    }
+}
+
+var aecAligner: AecAligner?
 
 // ============================================================
 // CANAL 1: audio del sistema (Core Audio process tap)
@@ -409,7 +524,7 @@ var firstMicFrame = true
 
 var ioProcID: AudioDeviceIOProcID?
 let ioStatus = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, nil) {
-    _, inInputData, _, _, _ in
+    _, inInputData, inInputTime, _, _ in
     let bufferList = UnsafeMutableAudioBufferListPointer(
         UnsafeMutablePointer(mutating: inInputData)
     )
@@ -430,15 +545,13 @@ let ioStatus = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, nil) {
             mono.append(sum / Float(channels))
         }
     }
-    // Far-end del AEC3: lo que suena por los parlantes es la referencia que
-    // se resta del mic. Se alimenta CRUDO a la rate nativa del tap (sin el
-    // downsample a 16k, que mete aliasing — ver la sección AEC3).
-    if apmHandle != nil, let chunker = renderChunker {
-        let ints = floatsToInt16(mono)
-        _ = chunker.drain(ints) { frame in
-            feedRender(&frame) // directo, a la cadencia real del dispositivo
-        }
-    }
+    // Far-end del AEC3: al alineador con el timestamp de captura del buffer
+    // (mHostTime) para ubicarlo en la línea de tiempo común. El alineador
+    // corre el AEC en su worker; acá NO se procesa nada del mic.
+    let ts = inInputTime.pointee
+    let hostTime = (ts.mFlags.contains(.hostTimeValid) && ts.mHostTime != 0)
+        ? ts.mHostTime : mach_absolute_time()
+    aecAligner?.pushSystem(mono, hostTime: hostTime)
     // El canal "Them" del STT recibe el audio tal cual (el AEC solo toca el mic).
     let pcm = systemDownsampler.process(mono)
     if !pcm.isEmpty {
@@ -564,64 +677,20 @@ let auhalInputProc: AURenderCallback = { _, ioActionFlags, inTimeStamp, inBusNum
 
     let frames = Int(inNumberFrames)
     let mono = Array(UnsafeBufferPointer(start: auhalRenderMem, count: frames))
-    var rawPeakF: Float = 0
-    for s in mono {
-        let a = abs(s)
-        if a > micPeak { micPeak = a }
-        if a > rawPeakF { rawPeakF = a }
-    }
-    let rawPeak = Int32(min(rawPeakF, 1) * 32767)
-    rawMicPeakRecent = max(rawPeak, rawMicPeakRecent - (rawMicPeakRecent >> 4))
+    // micPeak alimenta el watchdog anti-mic-mudo (mic crudo, en ESTE
+    // callback: si el AUHAL muere, el worker deja de recibir y no lo vería).
+    for s in mono where abs(s) > micPeak { micPeak = abs(s) }
 
-    // Near-end del AEC3: cancela el eco A LA RATE NATIVA del dispositivo
-    // (antes del downsample, ver sección AEC3); el audio ya limpio baja a
-    // 16 kHz para el STT. Sin APM (rate rara / creación fallida) va crudo —
-    // degradación visible en el log, nunca mudo.
-    let source: [Float]
-    if let apm = apmHandle, let chunker = micChunker {
-        let processed = chunker.drain(floatsToInt16(mono)) { frame in
-            frame.withUnsafeMutableBufferPointer {
-                let status = apm_process_capture(apm, $0.baseAddress)
-                if status != 0 && !apmCaptureErrLogged {
-                    apmCaptureErrLogged = true
-                    log("AEC3: process_capture devolvió \(status) — el mic NO se está procesando")
-                }
-            }
-            // GATE de eco residual (para transcripción): a volumen alto el
-            // parlante distorsiona y el residuo no-lineal supera lo que el
-            // supresor puede estimar (medido: picos >2000 con el sistema a
-            // 75%). Discriminador: comparar la salida del AEC contra el mic
-            // CRUDO — si el AEC removió la mayoría del frame, era eco (se
-            // silencia el resto); si lo preservó, es la voz del usuario y
-            // pasa SIN importar el volumen del video. (La v1 comparaba
-            // contra el pico del RENDER y se comía la voz del usuario a
-            // distancia normal — el crudo es la vara correcta.)
-            if !aecBypassedNow() {
-                let renderPeak = renderPeakRecent
-                let rawPeak = rawMicPeakRecent
-                if renderPeak > 3000 && rawPeak > 0 {
-                    var framePeak: Int32 = 0
-                    for s in frame {
-                        let a = Int32(s.magnitude)
-                        if a > framePeak { framePeak = a }
-                    }
-                    // Umbral CONSERVADOR (15%): solo silencia frames donde
-                    // el AEC removió >85% (eco inequívoco). La voz del usuario
-                    // en double-talk (ratio típico 0.3-0.6) pasa SIEMPRE — la
-                    // 6ª QA mostró que el 45% la silenciaba. El eco que pase
-                    // lo caza el dedup textual (native.engine.ts).
-                    if framePeak < rawPeak * 15 / 100 && framePeak < 3000 {
-                        for i in 0..<frame.count { frame[i] = 0 }
-                    }
-                }
-            }
-        }
-        if processed.isEmpty { return noErr } // el chunker acumula; nada que emitir aún
-        source = int16ToFloats(processed)
-    } else {
-        source = mono
-    }
-    if let pcm = auhalDownsampler?.process(source), !pcm.isEmpty {
+    if let aligner = aecAligner {
+        // Near-end del AEC3: al alineador con su timestamp de captura. El
+        // worker corre el AEC render/capture ALINEADO y devuelve el mic
+        // limpio por onCleanMic (ver setup de onCleanMic).
+        let ts = inTimeStamp.pointee
+        let hostTime = (ts.mFlags.contains(.hostTimeValid) && ts.mHostTime != 0)
+            ? ts.mHostTime : mach_absolute_time()
+        aligner.pushMic(mono, hostTime: hostTime)
+    } else if let pcm = auhalDownsampler?.process(mono), !pcm.isEmpty {
+        // Sin alineador/APM: mic crudo directo (degradado pero nunca mudo).
         if firstMicFrame {
             firstMicFrame = false
             log("canal mic: primer frame emitido")
@@ -746,27 +815,38 @@ func startMicAuhal() -> Bool {
     }
     log("AUHAL: inicializado, arrancando IO…")
 
-    // (Re)crear el APM con las rates NATIVAS reales: tap (render) + este
-    // dispositivo (capture). Solo cambia si el device nuevo trae otra rate.
+    // (Re)crear el APM + alineador. El alineador necesita render y capture a
+    // la MISMA rate (línea de tiempo común); en la práctica ambos son 48 kHz.
+    // Si difieren, se cae a mic crudo sin AEC (caso raro).
     if apmHandle == nil || apmCaptureRate != Int(rate) {
+        aecAligner?.stop()
+        aecAligner = nil
         if let old = apmHandle {
             apmHandle = nil
             usleep(20_000) // dejar salir a los callbacks en vuelo
             apm_destroy(old)
         }
-        apmHandle = apm_create(Int32(systemRate), Int32(rate))
-        if let apm = apmHandle {
-            micChunker = FrameChunker(frame: Int(apm_capture_frame_samples(apm)))
-            renderChunker = FrameChunker(frame: Int(apm_render_frame_samples(apm)))
+        if Int(rate) == Int(systemRate), let apm = apm_create(Int32(systemRate), Int32(rate)) {
+            apmHandle = apm
             apmRenderFrame = Int(apm_render_frame_samples(apm))
             apmCaptureRate = Int(rate)
-            log("AEC3: APM creado (render \(Int(systemRate)) Hz / capture \(Int(rate)) Hz, nativo)")
+            let aligner = AecAligner(rate: rate, frame: Int(apm_capture_frame_samples(apm)))
+            aligner.onCleanMic = { clean in
+                // Worker del alineador: el mic YA limpio baja a 16 kHz → STT.
+                guard let pcm = auhalDownsampler?.process(clean), !pcm.isEmpty else { return }
+                if firstMicFrame {
+                    firstMicFrame = false
+                    log("canal mic: primer frame emitido")
+                }
+                writer.append(channel: CHANNEL_MIC, samples: pcm)
+            }
+            aecAligner = aligner
+            aligner.start()
+            log("AEC3: APM + alineador por timestamp (render/capture \(Int(rate)) Hz)")
         } else {
-            micChunker = nil
-            renderChunker = nil
             apmRenderFrame = 0
             apmCaptureRate = 0
-            log("AEC3: rate no soportada (\(Int(systemRate))/\(Int(rate))) — mic CRUDO sin AEC")
+            log("AEC3: sin APM (rate \(Int(systemRate))/\(Int(rate)) no soportada o distinta) — mic CRUDO")
         }
     }
 
@@ -936,31 +1016,8 @@ if micMode == "auhal" {
     if !startMicAuhal() { fail("no pude arrancar el mic (AUHAL)") }
     updateAecBypass()
     updateStreamDelay()
-
-    // Feeder de silencio del render (ver nota en la sección AEC3): inyecta
-    // ceros SOLO cuando el tap lleva >100 ms callado (silencio real del
-    // sistema), a cadencia de 10 ms, para que los contadores render/capture
-    // no se desalineen durante los huecos. Nunca compite con frames activos.
-    Thread.detachNewThread {
-        var zeroFrame: [Int16] = []
-        while true {
-            usleep(10_000)
-            guard apmHandle != nil, !paused else { continue }
-            let frameSize = apmRenderFrame
-            guard frameSize > 0 else { continue }
-            // OJO: last se escribe desde el hilo del IOProc; si un frame real
-            // llega entre leer `now` y leer `last`, last > now y `now - last`
-            // en UInt64 DESBORDA → trap de Swift (crash real visto en QA:
-            // SIGTRAP en este hilo con video activo). Comparar antes de restar.
-            let now = DispatchTime.now().uptimeNanoseconds
-            let last = lastRenderFeedNs
-            guard last > 0, now > last, now - last > 100_000_000 else { continue }
-            if zeroFrame.count != frameSize {
-                zeroFrame = [Int16](repeating: 0, count: frameSize)
-            }
-            feedRender(&zeroFrame)
-        }
-    }
+    // El silencio del sistema ya lo maneja el alineador (lee ceros donde el
+    // tap no escribió) — sin feeder de ceros aparte.
 } else {
     if !startMic(useVoiceProcessing: true) { fail("no pude arrancar el mic") }
 }
@@ -1033,6 +1090,9 @@ func resumeCapture() {
     paused = false
     if let proc = ioProcID { AudioDeviceStart(aggregateID, proc) }
     if micMode == "auhal" {
+        // La pausa dejó un salto grande en la línea de tiempo del alineador:
+        // resetearlo para re-anclar t0 con los buffers nuevos.
+        aecAligner?.reset()
         if let unit = auhalUnit, AudioOutputUnitStart(unit) != noErr {
             log("no pude reanudar el mic (AUHAL) — re-armando")
             startMicAuhal()
@@ -1067,7 +1127,11 @@ func cleanup() {
     }
     AudioHardwareDestroyAggregateDevice(aggregateID)
     AudioHardwareDestroyProcessTap(tapID)
-    // Con las unidades paradas ya no hay callbacks tocando el APM.
+    // Parar el worker del alineador antes de destruir el APM (no debe haber
+    // process_render/capture en vuelo cuando se libera).
+    aecAligner?.stop()
+    aecAligner = nil
+    // Con las unidades y el worker parados ya no hay callbacks tocando el APM.
     if let apm = apmHandle {
         apmHandle = nil
         apm_destroy(apm)

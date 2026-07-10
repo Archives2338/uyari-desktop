@@ -1,48 +1,53 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 
-// Sistema de temas del handoff (design_handoff_uyari 3/ui_kits/desktop):
-// dos temas por OVERRIDES de variables CSS sobre un wrapper — los
-// componentes no saben de temas, solo leen tokens. Light usa un tono de
-// papel cálido (#FAF9F5, crema suave — más descansado y "editorial" que
-// el blanco puro); Dark es la paleta DESK_DARK del widget. Por ahora el
-// tema SIGUE AL SISTEMA (prefers-color-scheme); el override manual con Settings.
+// Sistema de temas del handoff v4 (design_handoff_uyari 4/ui_kits/desktop,
+// IMPLEMENTACION-HOME-CHAT-TEMAS.md): dos temas por OVERRIDES de variables
+// CSS sobre un wrapper — los componentes no saben de temas, solo leen
+// tokens. Por ahora el tema SIGUE AL SISTEMA (prefers-color-scheme); el
+// override manual con Settings queda pendiente (no hay pantalla Settings).
+//
+// Dark: carbón neutro cálido estilo Granola (jerarquía por luminosidad,
+// NUNCA teñido de violeta en superficies — el violeta queda para detalles
+// escasos: tile del workspace, botón enviar, links, dots de estado). El
+// dark violeta-tintado anterior (#17151F/#232030) queda reservado al
+// widget de Meet (ver ui_kits/meet) — ahí sí conviene que la marca se
+// sienta porque vive sobre la UI de Google.
 
-export const PAPER_DEFAULT = '#FAF9F5'
+export const PAPER_DEFAULT = '#FDFDFB'
 
-// Paleta dark — copiada 1:1 de Flow.js.txt (DESK_DARK).
 export const DESK_DARK: Record<string, string> = {
-  '--desk': '#0D0C12',
-  '--paper': '#17151F',
-  '--surface': '#232030',
-  '--surface-card': '#232030',
-  '--surface-sunken': '#2C2939',
-  '--surface-page': '#17151F',
-  '--ink': '#F2F0FA',
-  '--ink-2': '#C9C6D8',
-  '--ink-3': '#918DA6',
-  '--ink-4': '#5F5B73',
-  '--border': '#332F42',
-  '--border-strong': '#443F56',
-  '--text-heading': '#F2F0FA',
-  '--text-body': '#C9C6D8',
-  '--text-muted': '#918DA6',
+  '--sidebar': '#191917',
+  '--paper': '#222220',
+  '--surface': '#2A2A27',
+  '--surface-card': '#2A2A27',
+  '--surface-sunken': '#262624',
+  '--surface-page': '#222220',
+  '--ink': '#F0EFEA',
+  '--ink-2': '#C7C6BE',
+  '--ink-3': '#A3A29A',
+  '--ink-4': '#6E6D66',
+  '--border': '#343430',
+  '--border-strong': '#454540',
+  '--text-heading': '#F0EFEA',
+  '--text-body': '#C7C6BE',
+  '--text-muted': '#A3A29A',
   '--text-link': '#A99BD9',
   '--accent-strong': '#A99BD9',
-  '--violet-soft': '#3A3352',
-  '--violet-wash': '#2A2640',
-  '--mint-soft': '#1E3A31',
-  '--cta-bg': '#F2F0FA',
+  '--violet-soft': 'rgba(132, 116, 196, 0.16)',
+  '--violet-wash': 'rgba(132, 116, 196, 0.10)',
+  '--mint-soft': 'rgba(16, 185, 129, 0.12)',
+  '--cta-bg': '#F0EFEA',
   '--cta-bg-hover': '#FFFFFF',
-  '--cta-fg': '#1E1B2E',
+  '--cta-fg': '#191917',
   '--shadow-card': '0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35)',
   '--shadow-float': '0 2px 6px rgba(0,0,0,0.35), 0 24px 64px rgba(0,0,0,0.5)',
   '--shadow-pop': '0 4px 12px rgba(0,0,0,0.35), 0 32px 80px rgba(0,0,0,0.5)',
 }
 
-// Derivación light — copiada 1:1 de Flow.js.txt (lightVars).
+/** Derivación light a partir de un tono de papel (hoy fijo en PAPER_DEFAULT;
+ *  el knob queda listo para cuando el override manual permita elegirlo). */
 export function lightVars(paper: string): Record<string, string> {
   return {
-    '--desk': `color-mix(in oklab, ${paper} 91%, #1E1B2E)`,
     '--paper': paper,
     '--surface': `color-mix(in oklab, #FFFFFF 70%, ${paper})`,
     '--surface-card': `color-mix(in oklab, #FFFFFF 70%, ${paper})`,

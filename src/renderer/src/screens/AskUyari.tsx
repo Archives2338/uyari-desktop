@@ -13,8 +13,10 @@ import { dayBucketLabel, formatRelativeDate, formatTimeAgo } from '@renderer/lib
 import type { MeetingListItem } from '@shared/domain'
 import flameIcon from '@renderer/assets/uyari-flame-violet.svg'
 
-// "Pregúntale a Uyari" — módulo de chat global (handoff v4,
-// IMPLEMENTACION-HOME-CHAT-TEMAS.md §3: CH1 home + CH2 conversación).
+// "Pregúntale a Uyari" — módulo de chat global. Fuente de verdad VISUAL:
+// design_handoff_uyari 4/ui_kits/desktop/explorations-chat.html (CH1+CH2)
+// — no Flow.js.txt/Flow2.js.txt, que son el controlador del ONBOARDING,
+// no el chat (confundible por el nombre "Flow").
 //
 // Alcance real vs el mock: el backend responde preguntas SUELTAS (sin
 // memoria de conversación — igual que el ask por reunión que ya existía),
@@ -22,17 +24,40 @@ import flameIcon from '@renderer/assets/uyari-flame-violet.svg'
 // simular un hilo multi-turno que no tenemos. Las tarjetas de cita SON
 // reales: el LLM declara de qué reuniones sacó la respuesta (ver
 // ASK_ALL_SYSTEM_PROMPT en el backend) y la UI solo pinta esas — nunca
-// inventa una fuente. El historial (Recientes/CH1, rail Hoy-Ayer/CH2) se
-// persiste LOCAL (localStorage, ver lib/askHistory.ts): el backend no
-// tiene un modelo de conversación todavía, así que no sincroniza entre
-// devices — se documenta, no se finge.
+// inventa una fuente. El historial (Recientes/CH1, grupo Hoy-Ayer/CH2 en
+// el MISMO sidebar de nav — no una columna nueva) se persiste LOCAL
+// (localStorage, ver lib/askHistory.ts): el backend no tiene un modelo de
+// conversación todavía, así que no sincroniza entre devices.
 //
-// Deliberadamente NO incluido (para no dejar controles decorativos sin
-// función real): el botón "Adjuntar" y el mic del composer del mock — no
-// hay una feature de adjuntos ni de dictado para ESTE input. "Enviar como
-// follow-up" sí se deja como affordance con aviso "coming soon" (mismo
-// patrón que el panel de calendario del Home) porque es una feature de
-// roadmap real, no un placeholder vacío.
+// Deliberadamente NO incluido: "Ver todas ›" de Recetas (solo hay 4, no
+// hay una librería más grande detrás que revelar). "Adjuntar" y el mic sí
+// se dejan (están en el mock) pero como affordance con "Coming soon" —
+// ninguna feature de adjuntos/dictado existe, y así queda dicho, no mudo.
+
+const RECIPE_ICONS: Array<string | string[]> = [
+  ['M9 11l3 3L22 4', 'M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11'],
+  'M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z',
+  ['M3 6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z', 'M16 2v4M8 2v4M3 10h18'],
+  ['M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z', 'm3 7 9 6 9-6'],
+]
+const MAIL_ICON = ['M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z', 'm3 7 9 6 9-6']
+const COPY_ICON = [
+  'M9 9h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V11a2 2 0 0 1 2-2z',
+  'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1',
+]
+const REGENERATE_ICON = ['M1 4v6h6', 'M3.51 15a9 9 0 1 0 2.13-9.36L1 10']
+const ATTACH_ICON =
+  'M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48'
+const MIC_ICON = ['M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z', 'M19 10v1a7 7 0 0 1-14 0v-1', 'M12 18v4']
+
+/** "jesus.rojas@…" → "Jesus". Aproximación honesta: no hay un campo de
+ *  nombre real en el perfil (el onboarding solo pide workspace/equipo). */
+function deriveDisplayName(email?: string): string | undefined {
+  if (!email) return undefined
+  const local = email.split('@')[0]?.split(/[._-]/)[0]
+  if (!local) return undefined
+  return local.charAt(0).toUpperCase() + local.slice(1)
+}
 
 function renderBold(text: string): ReactNode {
   const parts = text.split(/(\*\*[^*]+\*\*)/g)
@@ -48,12 +73,46 @@ function renderBold(text: string): ReactNode {
 function groupHistoryByDay(history: AskConversation[]): Array<[string, AskConversation[]]> {
   const map = new Map<string, AskConversation[]>()
   for (const h of history) {
-    const label = dayBucketLabel(h.createdAt)
+    const bucket = dayBucketLabel(h.createdAt)
+    const label = bucket === 'Today' ? S.ask.todayGroup : bucket === 'Yesterday' ? S.ask.yesterdayGroup : bucket
     const list = map.get(label)
     if (list) list.push(h)
     else map.set(label, [h])
   }
   return [...map.entries()]
+}
+
+function ScopeSelect({
+  scope,
+  onChange,
+  meetings,
+  citedCount,
+}: {
+  scope: string
+  onChange: (v: string) => void
+  meetings: MeetingListItem[]
+  /** Si hay una respuesta activa con citas, ofrece "N meetings" acotado a
+   *  esas fuentes — el "2 reuniones ▾" del mock, pero funcional de verdad. */
+  citedCount?: number
+}): React.JSX.Element {
+  return (
+    <div className="ask-scope-wrap">
+      <select className="ask-scope-select" value={scope} onChange={(e) => onChange(e.target.value)}>
+        {citedCount ? (
+          <option value="cited">
+            {citedCount} {citedCount === 1 ? 'meeting' : 'meetings'}
+          </option>
+        ) : null}
+        <option value="all">{S.ask.scopeAll}</option>
+        {meetings.map((m) => (
+          <option key={m.clientSessionId} value={m.clientSessionId}>
+            {m.title || 'Untitled meeting'}
+          </option>
+        ))}
+      </select>
+      <span className="ask-scope-chevron">▾</span>
+    </div>
+  )
 }
 
 function Composer({
@@ -64,6 +123,7 @@ function Composer({
   scope,
   onScopeChange,
   meetings,
+  citedCount,
   disabled,
 }: {
   variant: 'home' | 'bottom'
@@ -73,38 +133,15 @@ function Composer({
   scope: string
   onScopeChange: (v: string) => void
   meetings: MeetingListItem[]
+  citedCount?: number
   disabled: boolean
 }): React.JSX.Element {
-  const textarea = (
-    <textarea
-      className="ask-textarea"
-      placeholder={S.ask.composerPlaceholder}
-      value={value}
-      rows={variant === 'home' ? 2 : 1}
-      onChange={(e) => onChange(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault()
-          onSubmit()
-        }
-      }}
-      style={variant === 'bottom' ? { flex: 1, minHeight: 22, maxHeight: 22 } : undefined}
-    />
-  )
-  const scopeSelect = (
-    <select
-      className="ask-scope-select"
-      value={scope}
-      onChange={(e) => onScopeChange(e.target.value)}
-    >
-      <option value="all">{S.ask.scopeAll}</option>
-      {meetings.map((m) => (
-        <option key={m.clientSessionId} value={m.clientSessionId}>
-          {m.title || 'Untitled meeting'}
-        </option>
-      ))}
-    </select>
-  )
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      onSubmit()
+    }
+  }
   const sendBtn = (
     <button
       className="ask-send-btn"
@@ -112,7 +149,7 @@ function Composer({
       disabled={disabled || !value.trim()}
       aria-label={S.ask.send}
     >
-      {dIcon('M12 19V5M5 12l7-7 7 7', 2, 16)}
+      {dIcon('M12 19V5M5 12l7-7 7 7', 2, 15)}
     </button>
   )
 
@@ -128,12 +165,20 @@ function Composer({
           border: '1px solid var(--border)',
           borderRadius: 'var(--radius-pill)',
           boxShadow: 'var(--shadow-card)',
-          padding: '6px 8px 6px 18px',
+          padding: '8px 8px 8px 18px',
           boxSizing: 'border-box',
         }}
       >
-        {textarea}
-        {scopeSelect}
+        <textarea
+          className="ask-textarea"
+          placeholder={S.ask.bottomComposerPlaceholder}
+          value={value}
+          rows={1}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={onKeyDown}
+          style={{ flex: 1, minHeight: 20, maxHeight: 20, padding: 0 }}
+        />
+        <ScopeSelect scope={scope} onChange={onScopeChange} meetings={meetings} citedCount={citedCount} />
         {sendBtn}
       </div>
     )
@@ -142,9 +187,6 @@ function Composer({
     <div
       style={{
         width: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 10,
         background: 'var(--surface-card)',
         border: '1px solid var(--border)',
         borderRadius: 'var(--radius-xl)',
@@ -153,16 +195,34 @@ function Composer({
         boxSizing: 'border-box',
       }}
     >
-      {textarea}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        {scopeSelect}
-        {sendBtn}
+      <textarea
+        className="ask-textarea"
+        placeholder={S.ask.composerPlaceholder}
+        value={value}
+        rows={1}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={onKeyDown}
+        style={{ fontSize: 15, padding: 0 }}
+      />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
+        <button className="ask-pill-btn" title={S.ask.comingSoon}>
+          {dIcon(ATTACH_ICON, 1.7, 13)}
+          {S.ask.attach}
+        </button>
+        <ScopeSelect scope={scope} onChange={onScopeChange} meetings={meetings} />
+        <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button className="ask-icon-btn" title={S.ask.comingSoon} aria-label={S.ask.mic}>
+            {dIcon(MIC_ICON, 1.7, 15)}
+          </button>
+          {sendBtn}
+        </span>
       </div>
     </div>
   )
 }
 
 function ChatHome({
+  displayName,
   history,
   showAllRecent,
   onToggleShowAll,
@@ -176,6 +236,7 @@ function ChatHome({
   onRecipe,
   loading,
 }: {
+  displayName?: string
   history: AskConversation[]
   showAllRecent: boolean
   onToggleShowAll: () => void
@@ -193,28 +254,26 @@ function ChatHome({
   return (
     <div
       style={{
-        maxWidth: 640,
+        maxWidth: 620,
         width: '100%',
-        margin: '64px auto 0',
+        margin: '110px auto 0',
         display: 'flex',
         flexDirection: 'column',
-        alignItems: 'center',
-        gap: 26,
+        gap: 22,
       }}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
-        <img src={flameIcon} alt="" width={42} height={42} />
-        <h1
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+        <img src={flameIcon} alt="" style={{ height: 42 }} />
+        <span
           style={{
-            font: 'var(--display-md)',
-            fontSize: 26,
+            fontFamily: 'var(--font-serif-display)',
+            fontSize: 36,
+            fontWeight: 500,
             color: 'var(--text-heading)',
-            margin: 0,
-            textAlign: 'center',
           }}
         >
-          {S.ask.greeting}
-        </h1>
+          {S.ask.greeting(displayName)}
+        </span>
       </div>
 
       <Composer
@@ -229,15 +288,8 @@ function ChatHome({
       />
 
       {history.length > 0 && (
-        <div style={{ width: '100%' }}>
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'baseline',
-              marginBottom: 2,
-            }}
-          >
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
             <span
               style={{ font: 'var(--eyebrow)', letterSpacing: 'var(--eyebrow-tracking)', color: 'var(--ink-4)' }}
             >
@@ -255,20 +307,21 @@ function ChatHome({
                   color: 'var(--accent-strong)',
                 }}
               >
-                {showAllRecent ? S.ask.seeLess : S.ask.seeAll}
+                {showAllRecent ? S.ask.seeLess : `${S.ask.seeAll} +`}
               </button>
             )}
           </div>
           {shown.map((h) => (
             <div key={h.id} className="ask-recent-row" onClick={() => onSelectHistory(h.id)}>
-              <span style={{ color: 'var(--ink-3)', flexShrink: 0, display: 'inline-flex' }}>
-                {dIcon(['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6'], 1.6, 16)}
+              <span className="ask-recent-icon">
+                {dIcon(['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6'], 1.6, 13)}
               </span>
               <span
                 style={{
                   flex: 1,
                   minWidth: 0,
                   font: 'var(--text-sm)',
+                  fontWeight: 500,
                   color: 'var(--text-heading)',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
@@ -277,7 +330,7 @@ function ChatHome({
               >
                 {h.question}
               </span>
-              <span style={{ font: 'var(--text-xs)', color: 'var(--ink-4)', flexShrink: 0 }}>
+              <span style={{ marginLeft: 'auto', font: 'var(--text-xs)', fontWeight: 400, color: 'var(--ink-4)' }}>
                 {formatTimeAgo(h.createdAt)}
               </span>
             </div>
@@ -285,16 +338,14 @@ function ChatHome({
         </div>
       )}
 
-      <div style={{ width: '100%' }}>
-        <span
-          style={{ font: 'var(--eyebrow)', letterSpacing: 'var(--eyebrow-tracking)', color: 'var(--ink-4)' }}
-        >
+      <div>
+        <div style={{ font: 'var(--eyebrow)', letterSpacing: 'var(--eyebrow-tracking)', color: 'var(--ink-4)', marginBottom: 8 }}>
           {S.ask.recipesTitle}
-        </span>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-          {S.ask.recipes.map((r) => (
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {S.ask.recipes.map((r, i) => (
             <button key={r} className="ask-chip" onClick={() => onRecipe(r)} disabled={loading}>
-              {dIcon('M9 11l3 3L22 4', 1.6, 14)}
+              {dIcon(RECIPE_ICONS[i], 1.7, 13)}
               {r}
             </button>
           ))}
@@ -345,129 +396,106 @@ function ConversationView({
     c.actionItems.map((item, ii) => ({ key: `${entry.id}:${ci}:${ii}`, item })),
   )
   return (
-    <div
-      style={{
-        maxWidth: 640,
-        width: '100%',
-        margin: '24px auto 0',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 24,
-        paddingBottom: 90,
-      }}
-    >
-      <div className="ask-question-bubble">{entry.question}</div>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
+      <div
+        style={{
+          flex: 1,
+          maxWidth: 620,
+          width: '100%',
+          margin: '0 auto',
+          padding: '40px 0 20px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 18,
+          boxSizing: 'border-box',
+        }}
+      >
+        <div className="ask-question-bubble">{entry.question}</div>
 
-      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-        <img src={flameIcon} alt="" width={26} height={26} style={{ flexShrink: 0, marginTop: 2 }} />
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ font: 'var(--text-md)', color: 'var(--text-body)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-            {renderBold(entry.answer)}
-          </div>
-
-          {entry.citations.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {entry.citations.map((c) => (
-                <div key={c.clientSessionId} className="ask-citation-card">
-                  <span
-                    style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--violet)', flexShrink: 0 }}
-                  />
-                  <span
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                      font: 'var(--label-sm)',
-                      fontSize: 14,
-                      color: 'var(--text-heading)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {c.title || 'Untitled meeting'}
-                  </span>
-                  <span style={{ font: 'var(--text-xs)', color: 'var(--ink-4)', flexShrink: 0 }}>
-                    {formatRelativeDate(c.occurredAt)}
-                  </span>
-                  <button className="ask-citation-open" onClick={() => onOpenNote(c.clientSessionId)}>
-                    {S.ask.openNote}
-                  </button>
-                </div>
-              ))}
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+          <img src={flameIcon} alt="" style={{ height: 26, marginTop: 2, flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ font: 'var(--text-sm)', fontSize: 14, color: 'var(--ink)', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>
+              {renderBold(entry.answer)}
             </div>
-          )}
 
-          {allActionItems.length > 0 && (
-            <div
-              style={{
-                background: 'var(--violet-wash)',
-                border: '1px solid var(--violet-soft)',
-                borderRadius: 'var(--radius-lg)',
-                padding: 14,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 8,
-              }}
-            >
-              <span
-                style={{ font: 'var(--eyebrow)', letterSpacing: 'var(--eyebrow-tracking)', color: 'var(--ink-4)' }}
-              >
-                {S.ask.relatedActionItems}
-              </span>
-              {allActionItems.map(({ key, item }) => (
-                <label
-                  key={key}
-                  style={{
-                    display: 'flex',
-                    gap: 8,
-                    alignItems: 'flex-start',
-                    font: 'var(--text-sm)',
-                    color: 'var(--text-body)',
-                    cursor: 'pointer',
-                  }}
+            {entry.citations.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {entry.citations.map((c) => (
+                  <div key={c.clientSessionId} className="ask-citation-card">
+                    <span
+                      style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--violet)', flexShrink: 0 }}
+                    />
+                    <span className="ask-citation-title">
+                      {c.title || 'Untitled meeting'}
+                      <span className="ask-citation-meta"> · {formatRelativeDate(c.occurredAt)}</span>
+                    </span>
+                    <button className="ask-citation-open" onClick={() => onOpenNote(c.clientSessionId)}>
+                      {S.ask.openNote}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {allActionItems.length > 0 && (
+              <div className="ask-action-items">
+                <span
+                  style={{ font: 'var(--eyebrow)', letterSpacing: 'var(--eyebrow-tracking)', color: 'var(--accent-strong)' }}
                 >
-                  <input
-                    type="checkbox"
-                    checked={checked.has(key)}
-                    onChange={() => onToggleCheck(key)}
-                    style={{ marginTop: 3 }}
-                  />
-                  <span style={{ textDecoration: checked.has(key) ? 'line-through' : 'none', opacity: checked.has(key) ? 0.6 : 1 }}>
-                    {item}
-                  </span>
-                </label>
-              ))}
-            </div>
-          )}
+                  {S.ask.relatedActionItems}
+                </span>
+                {allActionItems.map(({ key, item }) => (
+                  <label
+                    key={key}
+                    style={{ display: 'flex', gap: 8, alignItems: 'flex-start', font: 'var(--text-sm)', fontSize: 13, color: 'var(--ink)', cursor: 'pointer' }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked.has(key)}
+                      onChange={() => onToggleCheck(key)}
+                      style={{ marginTop: 3 }}
+                    />
+                    <span style={{ textDecoration: checked.has(key) ? 'line-through' : 'none', opacity: checked.has(key) ? 0.6 : 1 }}>
+                      {item}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <button className="ask-answer-action" onClick={onCopy}>
-              {copied ? S.ask.copied : S.ask.copy}
-            </button>
-            <button className="ask-answer-action" onClick={onFollowUp}>
-              {S.ask.sendAsFollowUp}
-            </button>
-            <button className="ask-answer-action" onClick={onRegenerate} disabled={loading}>
-              {S.ask.regenerate}
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <button className="ask-answer-action" onClick={onCopy}>
+                {dIcon(COPY_ICON, 1.7, 13)}
+                {copied ? S.ask.copied : S.ask.copy}
+              </button>
+              <button className="ask-answer-action" onClick={onFollowUp}>
+                {dIcon(MAIL_ICON, 1.7, 13)}
+                {S.ask.sendAsFollowUp}
+              </button>
+              <button className="ask-answer-action" onClick={onRegenerate} disabled={loading}>
+                {dIcon(REGENERATE_ICON, 1.7, 13)}
+                {S.ask.regenerate}
+              </button>
+            </div>
+            {followUpNotice && (
+              <span style={{ font: 'var(--text-xs)', color: 'var(--ink-4)' }}>{S.ask.followUpComingSoon}</span>
+            )}
+
+            {entry.followUps.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {entry.followUps.map((f) => (
+                  <button key={f} className="ask-chip" onClick={() => onAskFollowUp(f)} disabled={loading}>
+                    {f}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-          {followUpNotice && (
-            <span style={{ font: 'var(--text-xs)', color: 'var(--ink-4)' }}>{S.ask.followUpComingSoon}</span>
-          )}
-
-          {entry.followUps.length > 0 && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {entry.followUps.map((f) => (
-                <button key={f} className="ask-chip" onClick={() => onAskFollowUp(f)} disabled={loading}>
-                  {f}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
       </div>
 
-      <div style={{ position: 'sticky', bottom: 0, paddingTop: 16, background: 'var(--paper)' }}>
+      <div style={{ maxWidth: 620, width: '100%', margin: '0 auto', padding: '10px 0 20px', boxSizing: 'border-box' }}>
         <Composer
           variant="bottom"
           value={input}
@@ -476,6 +504,7 @@ function ConversationView({
           scope={scope}
           onScopeChange={onScopeChange}
           meetings={meetings}
+          citedCount={entry.citations.length}
           disabled={loading}
         />
       </div>
@@ -483,83 +512,12 @@ function ConversationView({
   )
 }
 
-function HistoryRail({
-  history,
-  activeId,
-  onSelect,
-  onNew,
-}: {
-  history: AskConversation[]
-  activeId: string | null
-  onSelect: (id: string) => void
-  onNew: () => void
-}): React.JSX.Element {
-  const groups = groupHistoryByDay(history)
-  return (
-    <div
-      style={{
-        width: 200,
-        flexShrink: 0,
-        borderRight: '1px solid var(--border)',
-        padding: '48px 10px 14px',
-        overflowY: 'auto',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 16,
-        boxSizing: 'border-box',
-      }}
-    >
-      <button
-        onClick={onNew}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          background: 'var(--surface-sunken)',
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius-sm)',
-          padding: '7px 10px',
-          cursor: 'pointer',
-          font: 'var(--text-sm)',
-          fontWeight: 500,
-          color: 'var(--text-heading)',
-        }}
-      >
-        {dIcon('M12 5v14M5 12h14', 1.8, 14)}
-        {S.ask.newChat}
-      </button>
-      {groups.map(([label, items]) => (
-        <div key={label}>
-          <div
-            style={{
-              font: 'var(--eyebrow)',
-              fontSize: 10,
-              letterSpacing: 'var(--eyebrow-tracking)',
-              color: 'var(--ink-4)',
-              padding: '2px 8px 6px',
-            }}
-          >
-            {label === 'Today' ? S.ask.todayGroup : label === 'Yesterday' ? S.ask.yesterdayGroup : label.toUpperCase()}
-          </div>
-          {items.map((h) => (
-            <div
-              key={h.id}
-              className={`ask-history-row${h.id === activeId ? ' ask-history-row-active' : ''}`}
-              onClick={() => onSelect(h.id)}
-            >
-              {h.question}
-            </div>
-          ))}
-        </div>
-      ))}
-    </div>
-  )
-}
-
 export function AskUyari(): React.JSX.Element {
   const closeAsk = useApp((s) => s.closeAsk)
   const openMeeting = useApp((s) => s.openMeeting)
+  const auth = useApp((s) => s.auth)
   const flow = useMemo(loadFlow, [])
+  const displayName = useMemo(() => deriveDisplayName(auth.email), [auth.email])
 
   const [history, setHistory] = useState<AskConversation[]>(() => loadAskHistory())
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -585,14 +543,27 @@ export function AskUyari(): React.JSX.Element {
 
   const active = history.find((h) => h.id === activeId) ?? null
 
+  // Alcance del composer inferior: si la respuesta activa citó reuniones,
+  // arranca acotado a esas (el "2 reuniones ▾" del mock, pero real — no
+  // solo un label). Cambiar de conversación resetea el alcance.
+  useEffect(() => {
+    setScope(active && active.citations.length > 0 ? 'cited' : 'all')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId])
+
+  const resolveMeetingIds = (): string[] | undefined => {
+    if (scope === 'cited' && active) return active.citations.map((c) => c.clientSessionId)
+    if (scope === 'all' || scope === 'cited') return undefined
+    return [scope]
+  }
+
   const submit = async (question: string): Promise<void> => {
     const q = question.trim()
     if (!q || loading) return
     setLoading(true)
     setError('')
     try {
-      const meetingIds = scope === 'all' ? undefined : [scope]
-      const result = await window.uyari.meetings.askAll(q, meetingIds)
+      const result = await window.uyari.meetings.askAll(q, resolveMeetingIds())
       const entry: AskConversation = {
         id: crypto.randomUUID(),
         question: q,
@@ -634,16 +605,18 @@ export function AskUyari(): React.JSX.Element {
 
   return (
     <div style={{ flex: 1, display: 'flex', minHeight: 0, height: '100%' }}>
-      <Sidebar workspace={flow.workspace} wsColorId={flow.wsColor} active="ask" onHome={closeAsk} />
-      {active && (
-        <HistoryRail
-          history={history}
-          activeId={activeId}
-          onSelect={setActiveId}
-          onNew={() => setActiveId(null)}
-        />
-      )}
-      <main style={{ flex: 1, overflowY: 'auto', padding: '20px 40px 40px', boxSizing: 'border-box' }}>
+      <Sidebar
+        workspace={flow.workspace}
+        wsColorId={flow.wsColor}
+        active="ask"
+        onHome={closeAsk}
+        askHistory={
+          active
+            ? { groups: groupHistoryByDay(history), activeId, onSelect: setActiveId }
+            : undefined
+        }
+      />
+      <main style={{ flex: 1, overflowY: 'auto', padding: '0 40px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
         {active ? (
           <ConversationView
             entry={active}
@@ -666,6 +639,7 @@ export function AskUyari(): React.JSX.Element {
           />
         ) : (
           <ChatHome
+            displayName={displayName}
             history={history}
             showAllRecent={showAllRecent}
             onToggleShowAll={() => setShowAllRecent((v) => !v)}
@@ -681,7 +655,7 @@ export function AskUyari(): React.JSX.Element {
           />
         )}
         {error && (
-          <p className="error-text" style={{ maxWidth: 640, margin: '16px auto 0' }}>
+          <p className="error-text" style={{ maxWidth: 620, margin: '16px auto 0', width: '100%' }}>
             {error}
           </p>
         )}

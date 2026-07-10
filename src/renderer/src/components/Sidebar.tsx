@@ -45,12 +45,20 @@ function SideItem({
   )
 }
 
+export interface SidebarAskHistory {
+  /** [etiqueta del grupo ("Today"/"Yesterday"/fecha), entradas] */
+  groups: Array<[string, Array<{ id: string; question: string }>]>
+  activeId: string | null
+  onSelect: (id: string) => void
+}
+
 export function Sidebar({
   workspace,
   wsColorId,
   active = 'home',
   onHome,
   onAsk,
+  askHistory,
 }: {
   workspace: string
   wsColorId: string
@@ -58,6 +66,10 @@ export function Sidebar({
   active?: 'home' | 'shared' | 'ask'
   onHome?: () => void
   onAsk?: () => void
+  /** En una conversación de "Pregúntale a Uyari": el nav de Spaces/My notes
+   *  se reemplaza por el historial Hoy/Ayer (mismo patrón del handoff —
+   *  explorations-chat.html CH2, NO es una columna nueva). */
+  askHistory?: SidebarAskHistory
 }): React.JSX.Element {
   const initial = (workspace || 'U').trim().charAt(0).toUpperCase()
   const ws = WS_COLORS.find((c) => c.id === wsColorId) ?? WS_COLORS[0]
@@ -99,41 +111,85 @@ export function Sidebar({
         active={active === 'home'}
         onClick={onHome}
       />
-      <SideItem
-        icon={i([
-          'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2',
-          'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
-          'M23 21v-2a4 4 0 0 0-3-3.87',
-          'M16 3.13a4 4 0 0 1 0 7.75',
-        ])}
-        label={S.home.nav.shared}
-        active={active === 'shared'}
-      />
+      {!askHistory && (
+        <SideItem
+          icon={i([
+            'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2',
+            'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
+            'M23 21v-2a4 4 0 0 0-3-3.87',
+            'M16 3.13a4 4 0 0 1 0 7.75',
+          ])}
+          label={S.home.nav.shared}
+          active={active === 'shared'}
+        />
+      )}
       <SideItem
         icon={i('M8 12a8 7 0 1 1 4 6.2L7 20l.8-3.4A8 7 0 0 1 8 12z')}
         label={S.home.nav.ask}
         active={active === 'ask'}
         onClick={onAsk}
       />
-      <div
-        style={{
-          font: 'var(--eyebrow)',
-          letterSpacing: 'var(--eyebrow-tracking)',
-          color: 'var(--ink-4)',
-          padding: '16px 10px 6px',
-        }}
-      >
-        {S.home.spaces}
-      </div>
-      <SideItem icon={i(['M5 11h14v10H5z', 'M8 11V7a4 4 0 0 1 8 0v4'])} label={S.home.myNotes} />
-      <SideItem
-        icon={i([
-          'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
-          'M12 11v6M9 14h6',
-        ])}
-        label={S.home.addFolder}
-        indent
-      />
+      {askHistory ? (
+        <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {askHistory.groups.map(([label, items]) => (
+            <div key={label}>
+              <div
+                style={{
+                  font: 'var(--eyebrow)',
+                  letterSpacing: 'var(--eyebrow-tracking)',
+                  color: 'var(--ink-4)',
+                  padding: '16px 10px 6px',
+                }}
+              >
+                {label}
+              </div>
+              {items.map((h) => (
+                <div
+                  key={h.id}
+                  onClick={() => askHistory.onSelect(h.id)}
+                  style={{
+                    padding: '7px 10px',
+                    borderRadius: 'var(--radius-sm)',
+                    font: 'var(--text-sm)',
+                    fontSize: 13,
+                    fontWeight: h.id === askHistory.activeId ? 500 : 400,
+                    color: h.id === askHistory.activeId ? 'var(--text-heading)' : 'var(--ink-2)',
+                    background: h.id === askHistory.activeId ? 'var(--surface-sunken)' : 'transparent',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {h.question}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <>
+          <div
+            style={{
+              font: 'var(--eyebrow)',
+              letterSpacing: 'var(--eyebrow-tracking)',
+              color: 'var(--ink-4)',
+              padding: '16px 10px 6px',
+            }}
+          >
+            {S.home.spaces}
+          </div>
+          <SideItem icon={i(['M5 11h14v10H5z', 'M8 11V7a4 4 0 0 1 8 0v4'])} label={S.home.myNotes} />
+          <SideItem
+            icon={i([
+              'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
+              'M12 11v6M9 14h6',
+            ])}
+            label={S.home.addFolder}
+            indent
+          />
+        </>
+      )}
       <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '4px 6px', cursor: 'pointer' }}>
           <span

@@ -822,21 +822,81 @@ body {
   color: var(--ink-4);
 }
 
+/* Selector de alcance: <select> real (accesible, funcional) con chrome
+   nativo apagado + chevron propio superpuesto — pill visual, sin perder
+   la interacción nativa (evita reconstruir un dropdown a mano). */
+.ask-scope-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
 .ask-scope-select {
-  background: var(--surface-sunken);
+  appearance: none;
+  -webkit-appearance: none;
+  background: none;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   color: var(--ink-2);
   font: var(--text-xs);
   font-weight: 500;
-  padding: 6px 10px;
+  padding: 7px 22px 7px 12px;
   cursor: pointer;
-  max-width: 180px;
+  max-width: 170px;
+  text-overflow: ellipsis;
+}
+
+.ask-scope-chevron {
+  position: absolute;
+  right: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--ink-3);
+  font-size: 9px;
+}
+
+.ask-icon-btn {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--ink-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.ask-icon-btn:hover {
+  background: var(--surface-sunken);
+}
+
+.ask-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: var(--text-xs);
+  font-weight: 500;
+  color: var(--ink-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 7px 12px;
+  background: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ask-pill-btn:hover {
+  background: var(--surface-sunken);
 }
 
 .ask-send-btn {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   flex-shrink: 0;
   border-radius: 50%;
   border: none;
@@ -858,7 +918,7 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 4px;
+  padding: 9px 4px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
 }
@@ -867,18 +927,30 @@ body {
   background: var(--violet-wash);
 }
 
-.ask-recent-row:first-child {
-  border-top: 1px solid var(--border);
+.ask-recent-row:last-child {
+  border-bottom: none;
+}
+
+.ask-recent-icon {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  background: var(--sidebar);
+  color: var(--accent-strong);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .ask-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: var(--surface-sunken);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
-  padding: 8px 14px;
+  padding: 8px 13px;
   font: var(--text-xs);
   font-weight: 500;
   color: var(--ink-2);
@@ -899,14 +971,13 @@ body {
    es neutro (regla del handoff). */
 .ask-question-bubble {
   align-self: flex-end;
-  max-width: 78%;
+  max-width: 75%;
   background: var(--sidebar);
-  border: 1px solid var(--border);
   color: var(--text-heading);
   font: var(--text-sm);
   line-height: 1.5;
   border-radius: 16px 16px 4px 16px;
-  padding: 10px 16px;
+  padding: 12px 16px;
 }
 
 .ask-citation-card {
@@ -916,15 +987,36 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface);
-  padding: 10px 12px;
+  padding: 10px 13px;
+}
+
+.ask-citation-title {
+  flex: 1;
+  min-width: 0;
+  font: var(--label-sm);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-heading);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ask-citation-meta {
+  font: var(--text-xs);
+  font-weight: 400;
+  color: var(--ink-4);
 }
 
 .ask-citation-open {
+  margin-left: auto;
+  flex-shrink: 0;
   background: none;
   border: none;
   cursor: pointer;
   font: var(--label-sm);
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--accent-strong);
   padding: 0;
   white-space: nowrap;
@@ -934,36 +1026,30 @@ body {
   text-decoration: underline;
 }
 
+/* Panel tostado suave (paper, no violeta) — action items relacionados. */
+.ask-action-items {
+  background: color-mix(in oklab, var(--sidebar) 45%, var(--paper));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
 .ask-answer-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   background: none;
   border: none;
   cursor: pointer;
   font: var(--text-xs);
+  font-weight: 500;
   color: var(--ink-4);
   padding: 0;
 }
 
 .ask-answer-action:hover {
-  color: var(--text-heading);
-}
-
-.ask-history-row {
-  padding: 7px 8px;
-  border-radius: var(--radius-sm);
-  font: var(--text-sm);
-  font-size: 13px;
-  color: var(--ink-2);
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ask-history-row:hover {
-  background: var(--violet-wash);
-}
-
-.ask-history-row-active {
-  background: var(--surface-sunken);
   color: var(--text-heading);
 }

@@ -148,9 +148,12 @@ export const S = {
   },
   ask: {
     newChat: 'New',
-    greeting: 'What do you want to know?',
-    composerPlaceholder: 'Ask about any of your meetings…',
+    greeting: (name?: string): string => (name ? `Hi ${name}, what do you want to know?` : 'What do you want to know?'),
+    composerPlaceholder: 'What came up this week?',
+    bottomComposerPlaceholder: 'Keep asking…',
     attach: 'Attach',
+    mic: 'Dictate',
+    comingSoon: 'Coming soon',
     scopeAll: 'All meetings',
     send: 'Send',
     recentTitle: 'Recent',
@@ -173,8 +176,8 @@ export const S = {
     thinking: 'Thinking…',
     empty: "You don't have any transcribed meetings yet — start capturing one and come back to ask about it.",
     error: 'Could not reach Uyari. Try again in a moment.',
-    todayGroup: 'TODAY',
-    yesterdayGroup: 'YESTERDAY',
+    todayGroup: 'Today',
+    yesterdayGroup: 'Yesterday',
   },
 } as const
 

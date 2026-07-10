@@ -26,6 +26,10 @@ export function createDetectionBanner(label: string): BrowserWindow {
     skipTaskbar: true,
     focusable: false,
     show: false,
+    // Nivel asertado ya en el constructor (belt-and-suspenders, como Granola):
+    // si setVisibleOnAllWorkspaces reordenara el nivel, el flag del constructor
+    // lo re-ancla.
+    alwaysOnTop: true,
     // NSPanel: flota sobre apps en pantalla completa (Zoom) sin activarse ni
     // robar foco, y no aparece como ventana suelta en Mission Control (patrón
     // Granola para su banner de detección).
@@ -39,9 +43,14 @@ export function createDetectionBanner(label: string): BrowserWindow {
   })
 
   // 'screen-saver' (no 'floating'): queda por encima de la ventana de Zoom
-  // aun en pantalla completa. skipTransformProcessType evita que mostrarlo
+  // aun en pantalla completa. El TERCER arg es el relativeLevel: sube la
+  // ventana N niveles por encima del screen-saver base. Granola usa 1 (flag
+  // notification_always_on_top_level, default 1). Usamos 2 = un notch POR
+  // ENCIMA de su default para ganar el z-order cuando ambas notificaciones
+  // conviven (mismo nivel = empate que gana quien ordena al frente de último;
+  // un nivel mayor gana siempre). skipTransformProcessType evita que mostrarla
   // cambie el tipo de proceso de la app (parpadeo de Dock/foco).
-  win.setAlwaysOnTop(true, 'screen-saver')
+  win.setAlwaysOnTop(true, 'screen-saver', 2)
   win.setVisibleOnAllWorkspaces(true, {
     visibleOnFullScreen: true,
     skipTransformProcessType: true,
@@ -57,6 +66,12 @@ export function createDetectionBanner(label: string): BrowserWindow {
     void win.loadFile(join(import.meta.dirname, '../renderer/index.html'), { query })
   }
 
-  win.once('ready-to-show', () => win.showInactive())
+  // showInactive (no roba foco) + moveTop: nos re-ordena al frente de nuestro
+  // nivel en el instante de aparecer, para ganar el empate contra cualquier
+  // otra notificación del mismo nivel que se muestre casi a la vez.
+  win.once('ready-to-show', () => {
+    win.showInactive()
+    win.moveTop()
+  })
   return win
 }

@@ -60,6 +60,9 @@ export function createOverlayWindow(initiallyVisible: boolean): BrowserWindow {
     // su focusMain explícito. hiddenInMissionControl: no ensucia el expose.
     type: 'panel',
     hiddenInMissionControl: true,
+    // Nivel asertado ya en el constructor (patrón Granola) por si
+    // setVisibleOnAllWorkspaces reordenara el nivel al mostrarse.
+    alwaysOnTop: true,
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.mjs'),
       contextIsolation: true,
@@ -67,7 +70,10 @@ export function createOverlayWindow(initiallyVisible: boolean): BrowserWindow {
     },
   })
 
-  win.setAlwaysOnTop(true, 'screen-saver')
+  // relativeLevel = 2: un notch por encima del screen-saver base (y del
+  // default 1 de la Notification de Granola), para no quedar tapado por otra
+  // ventana del mismo nivel que se muestre casi a la vez.
+  win.setAlwaysOnTop(true, 'screen-saver', 2)
   win.setVisibleOnAllWorkspaces(true, {
     visibleOnFullScreen: true,
     skipTransformProcessType: true,
@@ -82,7 +88,11 @@ export function createOverlayWindow(initiallyVisible: boolean): BrowserWindow {
     })
   }
 
-  if (initiallyVisible) win.once('ready-to-show', () => win.showInactive())
+  if (initiallyVisible)
+    win.once('ready-to-show', () => {
+      win.showInactive()
+      win.moveTop()
+    })
   return win
 }
 
@@ -103,7 +113,10 @@ export function syncNubWithMainWindow(
     const overlay = getOverlay()
     if (!overlay || overlay.isDestroyed()) return
     if (mainFocused) overlay.hide()
-    else if (isCapturing()) overlay.showInactive()
+    else if (isCapturing()) {
+      overlay.showInactive()
+      overlay.moveTop() // re-asserta el frente al re-aparecer (empate de nivel)
+    }
   }
   mainWin.on('focus', () => update(true))
   mainWin.on('blur', () => update(false))

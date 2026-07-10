@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useApp } from '@renderer/store'
 import { dIcon } from '@renderer/ui/chrome'
 import { S } from '@renderer/strings'
@@ -84,24 +84,18 @@ function groupThreadsByDay(threads: AskThread[]): Array<[string, AskThread[]]> {
   return [...map.entries()]
 }
 
-/** El glifo de flama vía CSS mask (no <img>): se colorea con
- *  --accent-strong y sigue el tema automáticamente (violeta en light,
- *  lila en dark), a diferencia del SVG suelto que trae su violeta fijo. */
+/** El glifo de flama. Se probó como CSS mask (para recolorear con
+ *  --accent-strong y seguir el tema) pero el mask-image no cargaba el SVG
+ *  en Electron/Vite — se veía como un cuadrado sólido sin recortar
+ *  (bug visto en vivo). <img> es lo que ya funciona probado; el SVG trae
+ *  su violeta fijo (#8474C4), cercano a --accent-strong en ambos temas. */
 function Flame({ size = 42, className }: { size?: number; className?: string }): React.JSX.Element {
-  const mask: CSSProperties = {
-    WebkitMaskImage: `url(${flameIcon})`,
-    WebkitMaskSize: 'contain',
-    WebkitMaskRepeat: 'no-repeat',
-    WebkitMaskPosition: 'center',
-    maskImage: `url(${flameIcon})`,
-    maskSize: 'contain',
-    maskRepeat: 'no-repeat',
-    maskPosition: 'center',
-  }
   return (
-    <span
+    <img
+      src={flameIcon}
+      alt=""
       className={className}
-      style={{ width: size, height: size, display: 'inline-block', flexShrink: 0, background: 'var(--accent-strong)', ...mask }}
+      style={{ width: size, height: size, display: 'inline-block', flexShrink: 0 }}
     />
   )
 }

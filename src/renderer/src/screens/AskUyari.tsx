@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useApp } from '@renderer/store'
 import { dIcon } from '@renderer/ui/chrome'
 import { S } from '@renderer/strings'
@@ -17,46 +17,40 @@ import type { MeetingListItem } from '@shared/domain'
 import flameIcon from '@renderer/assets/uyari-flame-violet.svg'
 
 // "Pregúntale a Uyari" — módulo de chat global. Fuente de verdad VISUAL:
-// design_handoff_uyari 4/ui_kits/desktop/explorations-chat.html (CH1+CH2)
-// — no Flow.js.txt/Flow2.js.txt, que son el controlador del ONBOARDING,
-// no el chat (confundible por el nombre "Flow").
+// entregas/chat-pensando/Chat.js.txt + CAMBIOS-CHAT-PENSANDO.md (10 jul,
+// segunda pasada — reemplaza el layout de explorations-chat.html en dos
+// puntos concretos: la flama deja de acompañar cada respuesta y pasa a
+// ser una FIRMA al final (FlameSign, con hover/click), y el indicador de
+// "pensando" tiene palabras rotando + flama pulsante, estilo Claude Code.
 //
-// Modelo de datos: un THREAD con TURNOS (patrón chat_thread/chat_message
-// de Granola, RE en os/granola-desktop.md §1b — un solo motor de chat, un
-// follow-up es el turno N+1 del MISMO hilo). Antes cada pregunta creaba
-// una entrada de historial suelta — un usuario cazó el bug probando: un
-// follow-up abría un chat nuevo en vez de continuar la conversación.
-// Además de agrupar visualmente, el backend ahora recibe los turnos
-// previos como contexto (`history` en askAll) — sin eso, agrupar sería
-// solo cosmético: un follow-up como "¿quiénes participaron?" no sabría a
-// qué se refiere "esa reunión" sin ver la pregunta anterior.
+// Modelo de datos (sin cambios en esta pasada): un THREAD con TURNOS
+// (patrón chat_thread/chat_message de Granola, RE en
+// os/granola-desktop.md §1b). Las tarjetas de cita SON reales — el LLM
+// declara de qué reuniones sacó la respuesta, la UI solo pinta esas. El
+// historial se persiste LOCAL (localStorage): el backend no tiene tablas
+// de conversación todavía.
 //
-// Las tarjetas de cita SON reales: el LLM declara de qué reuniones sacó
-// la respuesta (ver ASK_ALL_SYSTEM_PROMPT en el backend) y la UI solo
-// pinta esas — nunca inventa una fuente. El historial se persiste LOCAL
-// (localStorage, ver lib/askHistory.ts): el backend no tiene tablas de
-// conversación todavía, así que no sincroniza entre devices.
-//
-// Deliberadamente NO incluido: "Ver todas ›" de Recetas (solo hay 4, no
-// hay una librería más grande detrás que revelar). "Adjuntar" y el mic sí
-// se dejan (están en el mock) pero como affordance con "Coming soon" —
-// ninguna feature de adjuntos/dictado existe, y así queda dicho, no mudo.
+// Cambios de esta pasada vs la anterior: el panel de action items pasa a
+// ser una lista DECORATIVA (checkbox falso, sin estado — igual que el
+// mock; no había persistencia real detrás de mi versión "interactiva"
+// tampoco, así que esto es una simplificación honesta, no una regresión).
+// "Adjuntar"/mic se sacan del composer (el mock ya no los tiene). "Ver
+// todas ›" de Recetas vuelve, con aviso "Coming soon" — visualmente
+// completo, sin fingir una librería de recetas que no existe.
 
 const RECIPE_ICONS: Array<string | string[]> = [
-  ['M9 11l3 3L22 4', 'M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11'],
-  'M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z',
-  ['M3 6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z', 'M16 2v4M8 2v4M3 10h18'],
+  ['M9 11l3 3 8-8', 'M21 12v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h11'],
+  ['M12 20h9', 'M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z'],
+  ['M8 2v4M16 2v4', 'M3 8h18', 'M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z'],
   ['M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z', 'm3 7 9 6 9-6'],
 ]
-const MAIL_ICON = ['M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z', 'm3 7 9 6 9-6']
+const SEND_ICON = ['M12 19V5', 'm5 12 7-7 7 7']
 const COPY_ICON = [
   'M9 9h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V11a2 2 0 0 1 2-2z',
   'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1',
 ]
+const MAIL_ICON = ['M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z', 'm3 7 9 6 9-6']
 const REGENERATE_ICON = ['M1 4v6h6', 'M3.51 15a9 9 0 1 0 2.13-9.36L1 10']
-const ATTACH_ICON =
-  'M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48'
-const MIC_ICON = ['M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z', 'M19 10v1a7 7 0 0 1-14 0v-1', 'M12 18v4']
 
 /** "jesus.rojas@…" → "Jesus". Aproximación honesta: no hay un campo de
  *  nombre real en el perfil (el onboarding solo pide workspace/equipo). */
@@ -88,6 +82,85 @@ function groupThreadsByDay(threads: AskThread[]): Array<[string, AskThread[]]> {
     else map.set(label, [t])
   }
   return [...map.entries()]
+}
+
+/** El glifo de flama vía CSS mask (no <img>): se colorea con
+ *  --accent-strong y sigue el tema automáticamente (violeta en light,
+ *  lila en dark), a diferencia del SVG suelto que trae su violeta fijo. */
+function Flame({ size = 42, className }: { size?: number; className?: string }): React.JSX.Element {
+  const mask: CSSProperties = {
+    WebkitMaskImage: `url(${flameIcon})`,
+    WebkitMaskSize: 'contain',
+    WebkitMaskRepeat: 'no-repeat',
+    WebkitMaskPosition: 'center',
+    maskImage: `url(${flameIcon})`,
+    maskSize: 'contain',
+    maskRepeat: 'no-repeat',
+    maskPosition: 'center',
+  }
+  return (
+    <span
+      className={className}
+      style={{ width: size, height: size, display: 'inline-block', flexShrink: 0, background: 'var(--accent-strong)', ...mask }}
+    />
+  )
+}
+
+/** Firma al final de la última respuesta (patrón Claude): hover revela un
+ *  saludo, click hace un squish con rebote. Puramente de personalidad —
+ *  no navega a nada. */
+function FlameSign(): React.JSX.Element {
+  const [press, setPress] = useState(false)
+  const [hello, setHello] = useState(false)
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 6 }}>
+      <span
+        className="ask-flame-sign-btn"
+        onMouseDown={() => setPress(true)}
+        onMouseUp={() => setPress(false)}
+        onMouseLeave={() => {
+          setPress(false)
+          setHello(false)
+        }}
+        onMouseEnter={() => setHello(true)}
+        onClick={() => setHello(true)}
+        style={{ transform: press ? 'scale(0.78)' : hello ? 'scale(1.08)' : 'scale(1)' }}
+      >
+        <Flame size={30} />
+      </span>
+      <span
+        className="ask-flame-sign-hello"
+        style={{ opacity: hello ? 1 : 0, transform: hello ? 'none' : 'translateX(-4px)' }}
+      >
+        {S.ask.flameHello}
+      </span>
+    </div>
+  )
+}
+
+/** Indicador "pensando" (estilo Claude Code): flama pulsante + palabras
+ *  rotando cada 1.4s + puntos 0→3 cada 350ms en un span de ancho fijo
+ *  para que el texto no baile. */
+function Thinking(): React.JSX.Element {
+  const [idx, setIdx] = useState(0)
+  const [dots, setDots] = useState(0)
+  useEffect(() => {
+    const w = setInterval(() => setIdx((i) => (i + 1) % S.ask.thinkingWords.length), 1400)
+    const d = setInterval(() => setDots((n) => (n + 1) % 4), 350)
+    return () => {
+      clearInterval(w)
+      clearInterval(d)
+    }
+  }, [])
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+      <Flame size={22} className="ask-flame-pulse" />
+      <span style={{ font: 'var(--text-sm)', fontStyle: 'italic', color: 'var(--text-muted)' }}>
+        {S.ask.thinkingWords[idx]}
+        <span style={{ display: 'inline-block', width: 18, textAlign: 'left' }}>{'.'.repeat(dots)}</span>
+      </span>
+    </div>
+  )
 }
 
 function ScopeSelect({
@@ -144,12 +217,32 @@ function Composer({
   citedCount?: number
   disabled: boolean
 }): React.JSX.Element {
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Enter') {
       e.preventDefault()
       onSubmit()
     }
   }
+  const input = (
+    <input
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={onKeyDown}
+      placeholder={variant === 'home' ? S.ask.composerPlaceholder : S.ask.bottomComposerPlaceholder}
+      style={{
+        flex: '1 1 100%',
+        order: variant === 'bottom' ? 0 : -1,
+        minWidth: 0,
+        font: 'var(--text-sm)',
+        fontSize: variant === 'bottom' ? 14 : 15,
+        color: 'var(--ink)',
+        background: 'transparent',
+        border: 'none',
+        outline: 'none',
+        padding: variant === 'bottom' ? 0 : '2px 2px 12px',
+      }}
+    />
+  )
   const sendBtn = (
     <button
       className="ask-send-btn"
@@ -157,74 +250,29 @@ function Composer({
       disabled={disabled || !value.trim()}
       aria-label={S.ask.send}
     >
-      {dIcon('M12 19V5M5 12l7-7 7 7', 2, 15)}
+      {dIcon(SEND_ICON, 2, 15)}
     </button>
   )
-
-  if (variant === 'bottom') {
-    return (
-      <div
-        style={{
-          width: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          background: 'var(--surface-card)',
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius-pill)',
-          boxShadow: 'var(--shadow-card)',
-          padding: '8px 8px 8px 18px',
-          boxSizing: 'border-box',
-        }}
-      >
-        <textarea
-          className="ask-textarea"
-          placeholder={S.ask.bottomComposerPlaceholder}
-          value={value}
-          rows={1}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={onKeyDown}
-          style={{ flex: 1, minHeight: 20, maxHeight: 20, padding: 0 }}
-        />
-        <ScopeSelect scope={scope} onChange={onScopeChange} meetings={meetings} citedCount={citedCount} />
-        {sendBtn}
-      </div>
-    )
-  }
   return (
     <div
       style={{
-        width: '100%',
-        background: 'var(--surface-card)',
+        background: 'var(--surface)',
         border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-xl)',
+        borderRadius: variant === 'bottom' ? 'var(--radius-pill)' : 'var(--radius-lg)',
         boxShadow: 'var(--shadow-card)',
-        padding: '16px 18px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: variant === 'bottom' ? '8px 8px 8px 16px' : '14px 16px',
+        flexWrap: variant === 'bottom' ? 'nowrap' : 'wrap',
         boxSizing: 'border-box',
       }}
     >
-      <textarea
-        className="ask-textarea"
-        placeholder={S.ask.composerPlaceholder}
-        value={value}
-        rows={1}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={onKeyDown}
-        style={{ fontSize: 15, padding: 0 }}
-      />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
-        <button className="ask-pill-btn" title={S.ask.comingSoon}>
-          {dIcon(ATTACH_ICON, 1.7, 13)}
-          {S.ask.attach}
-        </button>
-        <ScopeSelect scope={scope} onChange={onScopeChange} meetings={meetings} />
-        <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button className="ask-icon-btn" title={S.ask.comingSoon} aria-label={S.ask.mic}>
-            {dIcon(MIC_ICON, 1.7, 15)}
-          </button>
-          {sendBtn}
-        </span>
-      </div>
+      {input}
+      <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: variant === 'bottom' ? 0 : 'auto' }}>
+        <ScopeSelect scope={scope} onChange={onScopeChange} meetings={meetings} citedCount={citedCount} />
+        {sendBtn}
+      </span>
     </div>
   )
 }
@@ -260,123 +308,103 @@ function ChatHome({
 }): React.JSX.Element {
   const shown = showAllRecent ? threads : threads.slice(0, 5)
   return (
-    <div
-      style={{
-        maxWidth: 620,
-        width: '100%',
-        margin: '110px auto 0',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 22,
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-        <img src={flameIcon} alt="" style={{ height: 42 }} />
-        <span
-          style={{
-            fontFamily: 'var(--font-serif-display)',
-            fontSize: 36,
-            fontWeight: 500,
-            color: 'var(--text-heading)',
-          }}
-        >
-          {S.ask.greeting(displayName)}
-        </span>
-      </div>
+    <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      <div
+        style={{
+          width: 620,
+          maxWidth: '88%',
+          marginTop: 'clamp(40px, 14vh, 130px)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 22,
+          paddingBottom: 40,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+          <Flame size={42} />
+          <span style={{ font: 'var(--display-md)', fontSize: 34, color: 'var(--text-heading)' }}>
+            {S.ask.greeting(displayName)}
+          </span>
+        </div>
 
-      <Composer
-        variant="home"
-        value={input}
-        onChange={onInputChange}
-        onSubmit={onSubmit}
-        scope={scope}
-        onScopeChange={onScopeChange}
-        meetings={meetings}
-        disabled={loading}
-      />
+        <Composer
+          variant="home"
+          value={input}
+          onChange={onInputChange}
+          onSubmit={onSubmit}
+          scope={scope}
+          onScopeChange={onScopeChange}
+          meetings={meetings}
+          disabled={loading}
+        />
 
-      {threads.length > 0 && (
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
-            <span
-              style={{ font: 'var(--eyebrow)', letterSpacing: 'var(--eyebrow-tracking)', color: 'var(--ink-4)' }}
-            >
-              {S.ask.recentTitle}
-            </span>
-            {threads.length > 5 && (
-              <button
-                onClick={onToggleShowAll}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  font: 'var(--label-sm)',
-                  fontSize: 12,
-                  color: 'var(--accent-strong)',
-                }}
-              >
-                {showAllRecent ? S.ask.seeLess : `${S.ask.seeAll} +`}
-              </button>
-            )}
-          </div>
-          {shown.map((t) => (
-            <div key={t.id} className="ask-recent-row" onClick={() => onSelectThread(t.id)}>
-              <span className="ask-recent-icon">
-                {dIcon(['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6'], 1.6, 13)}
-              </span>
+        {threads.length > 0 && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
               <span
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  font: 'var(--text-sm)',
-                  fontWeight: 500,
-                  color: 'var(--text-heading)',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
+                style={{ font: 'var(--eyebrow)', letterSpacing: 'var(--eyebrow-tracking)', color: 'var(--ink-4)' }}
               >
-                {t.title}
+                {S.ask.recentTitle}
               </span>
-              <span style={{ marginLeft: 'auto', font: 'var(--text-xs)', fontWeight: 400, color: 'var(--ink-4)' }}>
-                {formatTimeAgo(t.updatedAt)}
-              </span>
+              {threads.length > 5 && (
+                <button
+                  onClick={onToggleShowAll}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    font: 'var(--label-sm)',
+                    fontSize: 12,
+                    color: 'var(--accent-strong)',
+                  }}
+                >
+                  {showAllRecent ? S.ask.seeLess : `${S.ask.seeAll} +`}
+                </button>
+              )}
             </div>
-          ))}
-        </div>
-      )}
+            {shown.map((t) => (
+              <div key={t.id} className="ask-recent-row" onClick={() => onSelectThread(t.id)}>
+                <span className="ask-recent-icon">
+                  {dIcon(['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6'], 1.6, 13)}
+                </span>
+                <span
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    font: 'var(--text-sm)',
+                    fontWeight: 500,
+                    color: 'var(--text-heading)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {t.title}
+                </span>
+                <span style={{ marginLeft: 'auto', font: 'var(--text-xs)', fontWeight: 400, color: 'var(--ink-4)' }}>
+                  {formatTimeAgo(t.updatedAt)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
 
-      <div>
-        <div style={{ font: 'var(--eyebrow)', letterSpacing: 'var(--eyebrow-tracking)', color: 'var(--ink-4)', marginBottom: 8 }}>
-          {S.ask.recipesTitle}
-        </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {S.ask.recipes.map((r, i) => (
-            <button key={r} className="ask-chip" onClick={() => onRecipe(r)} disabled={loading}>
-              {dIcon(RECIPE_ICONS[i], 1.7, 13)}
-              {r}
+        <div>
+          <div style={{ font: 'var(--eyebrow)', letterSpacing: 'var(--eyebrow-tracking)', color: 'var(--ink-4)', marginBottom: 8 }}>
+            {S.ask.recipesTitle}
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {S.ask.recipes.map((r, i) => (
+              <button key={r} className="ask-chip" onClick={() => onRecipe(r)} disabled={loading}>
+                {dIcon(RECIPE_ICONS[i], 1.7, 13)}
+                {r}
+              </button>
+            ))}
+            <button className="ask-chip" title={S.ask.comingSoon}>
+              {S.ask.seeAllRecipes}
             </button>
-          ))}
+          </div>
         </div>
-      </div>
-    </div>
-  )
-}
-
-/** Burbuja de pregunta + flame/puntos latiendo — se pinta al toque
- *  (optimista), antes de que la respuesta llegue. Sin esto un click se
- *  siente muerto: nada cambiaba hasta que el turno completo aparecía. */
-function ThinkingBlock({ question }: { question?: string }): React.JSX.Element {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      {question !== undefined && <div className="ask-question-bubble">{question}</div>}
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-        <img src={flameIcon} alt="" className="ask-flame-thinking" style={{ height: 26, flexShrink: 0 }} />
-        <span className="ask-thinking-dots">
-          <span />
-          <span />
-          <span />
-        </span>
       </div>
     </div>
   )
@@ -387,8 +415,6 @@ function TurnBlock({
   isLast,
   isRegenerating,
   loading,
-  checked,
-  onToggleCheck,
   onOpenNote,
   onRegenerate,
   onCopy,
@@ -401,8 +427,6 @@ function TurnBlock({
   isLast: boolean
   isRegenerating: boolean
   loading: boolean
-  checked: Set<string>
-  onToggleCheck: (key: string) => void
   onOpenNote: (clientSessionId: string) => void
   onRegenerate: () => void
   onCopy: () => void
@@ -411,95 +435,82 @@ function TurnBlock({
   followUpNotice: boolean
   onAskFollowUp: (text: string) => void
 }): React.JSX.Element {
-  if (isRegenerating) return <ThinkingBlock question={turn.question} />
-  const allActionItems = turn.citations.flatMap((c, ci) =>
-    c.actionItems.map((item, ii) => ({ key: `${turn.id}:${ci}:${ii}`, item })),
-  )
+  if (isRegenerating) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <div className="ask-question-bubble">{turn.question}</div>
+        <Thinking />
+      </div>
+    )
+  }
+  const allActionItems = turn.citations.flatMap((c) => c.actionItems)
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
       <div className="ask-question-bubble">{turn.question}</div>
 
-      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-        <img src={flameIcon} alt="" style={{ height: 26, marginTop: 2, flexShrink: 0 }} />
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ font: 'var(--text-sm)', fontSize: 14, color: 'var(--ink)', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>
-            {renderBold(turn.answer)}
-          </div>
-
-          {turn.citations.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {turn.citations.map((c) => (
-                <div key={c.clientSessionId} className="ask-citation-card">
-                  <span
-                    style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--violet)', flexShrink: 0 }}
-                  />
-                  <span className="ask-citation-title">
-                    {c.title || 'Untitled meeting'}
-                    <span className="ask-citation-meta"> · {formatRelativeDate(c.occurredAt)}</span>
-                  </span>
-                  <button className="ask-citation-open" onClick={() => onOpenNote(c.clientSessionId)}>
-                    {S.ask.openNote}
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {allActionItems.length > 0 && (
-            <div className="ask-action-items">
-              <span
-                style={{ font: 'var(--eyebrow)', letterSpacing: 'var(--eyebrow-tracking)', color: 'var(--accent-strong)' }}
-              >
-                {S.ask.relatedActionItems}
-              </span>
-              {allActionItems.map(({ key, item }) => (
-                <label
-                  key={key}
-                  style={{ display: 'flex', gap: 8, alignItems: 'flex-start', font: 'var(--text-sm)', fontSize: 13, color: 'var(--ink)', cursor: 'pointer' }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked.has(key)}
-                    onChange={() => onToggleCheck(key)}
-                    style={{ marginTop: 3 }}
-                  />
-                  <span style={{ textDecoration: checked.has(key) ? 'line-through' : 'none', opacity: checked.has(key) ? 0.6 : 1 }}>
-                    {item}
-                  </span>
-                </label>
-              ))}
-            </div>
-          )}
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <button className="ask-answer-action" onClick={onCopy}>
-              {dIcon(COPY_ICON, 1.7, 13)}
-              {copied ? S.ask.copied : S.ask.copy}
-            </button>
-            <button className="ask-answer-action" onClick={onFollowUp}>
-              {dIcon(MAIL_ICON, 1.7, 13)}
-              {S.ask.sendAsFollowUp}
-            </button>
-            <button className="ask-answer-action" onClick={onRegenerate} disabled={loading}>
-              {dIcon(REGENERATE_ICON, 1.7, 13)}
-              {S.ask.regenerate}
-            </button>
-          </div>
-          {followUpNotice && (
-            <span style={{ font: 'var(--text-xs)', color: 'var(--ink-4)' }}>{S.ask.followUpComingSoon}</span>
-          )}
-
-          {isLast && turn.followUps.length > 0 && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {turn.followUps.map((f) => (
-                <button key={f} className="ask-chip" onClick={() => onAskFollowUp(f)} disabled={loading}>
-                  {f}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+      <div style={{ font: 'var(--text-sm)', fontSize: 14, lineHeight: 1.65, color: 'var(--text-heading)' }}>
+        {renderBold(turn.answer)}
       </div>
+
+      {turn.citations.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {turn.citations.map((c) => (
+            <div key={c.clientSessionId} className="ask-citation-card">
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--violet)', flexShrink: 0 }} />
+              <span className="ask-citation-title">
+                {c.title || 'Untitled meeting'}
+                <span className="ask-citation-meta"> · {formatRelativeDate(c.occurredAt)}</span>
+              </span>
+              <button className="ask-citation-open" onClick={() => onOpenNote(c.clientSessionId)}>
+                {S.ask.openNote}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {allActionItems.length > 0 && (
+        <div className="ask-action-items">
+          <span style={{ font: 'var(--eyebrow)', fontSize: 10, letterSpacing: 'var(--eyebrow-tracking)', color: 'var(--accent-strong)' }}>
+            {S.ask.relatedActionItems.toUpperCase()}
+          </span>
+          {allActionItems.map((item, i) => (
+            <span
+              key={i}
+              style={{ display: 'flex', gap: 9, alignItems: 'flex-start', font: 'var(--text-sm)', fontSize: 13, color: 'var(--text-heading)' }}
+            >
+              <span className="ask-action-item-box" />
+              {item}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <button className="ask-answer-action" onClick={onCopy}>
+          {dIcon(COPY_ICON, 1.7, 13)}
+          {copied ? S.ask.copied : S.ask.copy}
+        </button>
+        <button className="ask-answer-action" onClick={onFollowUp}>
+          {dIcon(MAIL_ICON, 1.7, 13)}
+          {S.ask.sendAsFollowUp}
+        </button>
+        <button className="ask-answer-action" onClick={onRegenerate} disabled={loading}>
+          {dIcon(REGENERATE_ICON, 1.7, 13)}
+          {S.ask.regenerate}
+        </button>
+      </div>
+      {followUpNotice && <span style={{ font: 'var(--text-xs)', color: 'var(--ink-4)' }}>{S.ask.followUpComingSoon}</span>}
+
+      {isLast && turn.followUps.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {turn.followUps.map((f) => (
+            <button key={f} className="ask-chip" onClick={() => onAskFollowUp(f)} disabled={loading}>
+              {f}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -509,8 +520,6 @@ function ConversationView({
   pendingQuestion,
   regeneratingTurnId,
   loading,
-  checked,
-  onToggleCheck,
   onOpenNote,
   onRegenerate,
   onCopy,
@@ -531,8 +540,6 @@ function ConversationView({
   pendingQuestion: string | null
   regeneratingTurnId: string | null
   loading: boolean
-  checked: Set<string>
-  onToggleCheck: (key: string) => void
   onOpenNote: (clientSessionId: string) => void
   onRegenerate: (turn: AskTurn) => void
   onCopy: (turn: AskTurn) => void
@@ -547,45 +554,45 @@ function ConversationView({
   meetings: MeetingListItem[]
   onSubmit: () => void
 }): React.JSX.Element {
+  const scrollRef = useRef<HTMLDivElement>(null)
   const turns = thread?.turns ?? []
   const lastTurn = turns[turns.length - 1]
-  return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
-      <div
-        style={{
-          flex: 1,
-          maxWidth: 620,
-          width: '100%',
-          margin: '0 auto',
-          padding: '40px 0 20px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 28,
-          boxSizing: 'border-box',
-        }}
-      >
-        {turns.map((turn) => (
-          <TurnBlock
-            key={turn.id}
-            turn={turn}
-            isLast={turn.id === lastTurn.id}
-            isRegenerating={regeneratingTurnId === turn.id}
-            loading={loading}
-            checked={checked}
-            onToggleCheck={onToggleCheck}
-            onOpenNote={onOpenNote}
-            onRegenerate={() => onRegenerate(turn)}
-            onCopy={() => onCopy(turn)}
-            copied={copiedTurnId === turn.id}
-            onFollowUp={() => onFollowUp(turn)}
-            followUpNotice={followUpNoticeTurnId === turn.id}
-            onAskFollowUp={onAskFollowUp}
-          />
-        ))}
-        {pendingQuestion !== null && <ThinkingBlock question={pendingQuestion} />}
-      </div>
+  const isThinking = pendingQuestion !== null || regeneratingTurnId !== null
 
-      <div style={{ maxWidth: 620, width: '100%', margin: '0 auto', padding: '10px 0 20px', boxSizing: 'border-box' }}>
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+  }, [turns.length, pendingQuestion, regeneratingTurnId])
+
+  return (
+    <>
+      <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+        <div style={{ width: 620, maxWidth: '88%', margin: '0 auto', padding: '44px 0 10px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {turns.map((turn) => (
+            <TurnBlock
+              key={turn.id}
+              turn={turn}
+              isLast={turn.id === lastTurn.id}
+              isRegenerating={regeneratingTurnId === turn.id}
+              loading={loading}
+              onOpenNote={onOpenNote}
+              onRegenerate={() => onRegenerate(turn)}
+              onCopy={() => onCopy(turn)}
+              copied={copiedTurnId === turn.id}
+              onFollowUp={() => onFollowUp(turn)}
+              followUpNotice={followUpNoticeTurnId === turn.id}
+              onAskFollowUp={onAskFollowUp}
+            />
+          ))}
+          {pendingQuestion !== null && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+              <div className="ask-question-bubble">{pendingQuestion}</div>
+              <Thinking />
+            </div>
+          )}
+          {!isThinking && turns.length > 0 && <FlameSign />}
+        </div>
+      </div>
+      <div style={{ width: 620, maxWidth: '88%', margin: '0 auto', padding: '10px 0 18px', alignSelf: 'center', flexShrink: 0, boxSizing: 'border-box' }}>
         <Composer
           variant="bottom"
           value={input}
@@ -598,7 +605,7 @@ function ConversationView({
           disabled={loading}
         />
       </div>
-    </div>
+    </>
   )
 }
 
@@ -617,12 +624,11 @@ export function AskUyari(): React.JSX.Element {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [showAllRecent, setShowAllRecent] = useState(false)
-  const [checked, setChecked] = useState<Set<string>>(new Set())
   const [copiedTurnId, setCopiedTurnId] = useState<string | null>(null)
   const [followUpNoticeTurnId, setFollowUpNoticeTurnId] = useState<string | null>(null)
   // Estado optimista: la pregunta aparece al toque, el flame late hasta
-  // que la respuesta real llega (ver ThinkingBlock). Sin esto un click en
-  // un follow-up se siente "muerto" — nada cambia hasta que todo el turno
+  // que la respuesta real llega (ver Thinking). Sin esto un click en un
+  // follow-up se siente "muerto" — nada cambia hasta que todo el turno
   // aparece de golpe.
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null)
   const [regeneratingTurnId, setRegeneratingTurnId] = useState<string | null>(null)
@@ -656,8 +662,8 @@ export function AskUyari(): React.JSX.Element {
   }
 
   /** Pregunta nueva: crea hilo si no hay uno abierto, si no agrega un turno
-   *  al hilo activo — con los turnos previos como contexto (ver comentario
-   *  de arriba: sin esto un follow-up no sabe a qué se refiere). */
+   *  al hilo activo — con los turnos previos como contexto (sin esto un
+   *  follow-up no sabe a qué se refiere "esa reunión"). */
   const submit = async (question: string): Promise<void> => {
     const q = question.trim()
     if (!q || loading) return
@@ -721,14 +727,6 @@ export function AskUyari(): React.JSX.Element {
     }
   }
 
-  const toggleChecked = (key: string): void =>
-    setChecked((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-
   const copyTurn = (turn: AskTurn): void => {
     void navigator.clipboard.writeText(turn.answer)
     setCopiedTurnId(turn.id)
@@ -741,6 +739,8 @@ export function AskUyari(): React.JSX.Element {
     setFollowUpNoticeTurnId(turn.id)
     setTimeout(() => setFollowUpNoticeTurnId((id) => (id === turn.id ? null : id)), 2500)
   }
+
+  const showConversation = active !== null || pendingQuestion !== null
 
   return (
     <div style={{ flex: 1, display: 'flex', minHeight: 0, height: '100%' }}>
@@ -762,15 +762,13 @@ export function AskUyari(): React.JSX.Element {
             : undefined
         }
       />
-      <main style={{ flex: 1, overflowY: 'auto', padding: '0 40px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
-        {active || pendingQuestion ? (
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        {showConversation ? (
           <ConversationView
             thread={active}
             pendingQuestion={pendingQuestion}
             regeneratingTurnId={regeneratingTurnId}
             loading={loading}
-            checked={checked}
-            onToggleCheck={toggleChecked}
             onOpenNote={openMeeting}
             onRegenerate={(turn) => void regenerateTurn(turn)}
             onCopy={copyTurn}
@@ -803,7 +801,7 @@ export function AskUyari(): React.JSX.Element {
           />
         )}
         {error && (
-          <p className="error-text" style={{ maxWidth: 620, margin: '16px auto 0', width: '100%' }}>
+          <p className="error-text" style={{ maxWidth: 620, margin: '16px auto 0', width: '100%', flexShrink: 0 }}>
             {error}
           </p>
         )}

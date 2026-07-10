@@ -139,3 +139,59 @@ fue la dirección equivocada (daña el near-end sin arreglar el eco saturado).
 Brecha restante hacia 30-40 dB: probablemente el resampler (ellos sinc,
 nosotros lineal para el 16k del STT) y afinado fino del delay ahora que la
 alineación es precisa.
+
+## 8. Pipeline STT de Granola (audit jul 2026, `main/deobfuscated.js`)
+
+Granola tiene TRES rutas Deepgram en el main; la que importa para paridad es
+la de **transcripción de reunión**: clase `_Z` (Deepgram) / `G7e` (AssemblyAI),
+config en `buildSocketOptions` (~línea 136098). `granola-talk` (~194691) es
+DICTADO (`dictation:true, endpointing:500, language:en`) — no usarla como
+referencia.
+
+### Parámetros del WS de reunión (verificados)
+- `model:nova-3, encoding:linear16, channels:1, smart_format:true,
+  interim_results:true, diarize:false` — igual que nosotros.
+- `language:multi` + **`endpointing:100`** (nosotros teníamos 300 → bajado a 100).
+- **`mip_opt_out:true`** (Deepgram no retiene/entrena con el audio) → copiado.
+- **`sample_rate`: la NATIVA del device (típ. 48000), sin resample** —
+  nosotros mandamos 16k con downsampler lineal (PENDIENTE evaluar 48k:
+  elimina el aliasing del lineal, Deepgram cobra igual; requiere cambiar el
+  protocolo del helper → STT).
+- NO usan `no_delay`, `utterance_end_ms`, `vad_events` ni `punctuate` en
+  reunión. Nuestro `no_delay:true` es adición propia (ok).
+- Keyterms (nova-3 keyterm prompting) solo en modo inglés, hasta 100; en
+  `multi` no mandan nada.
+- Auth: header `Authorization: Bearer|token` (usan `ws` de Node); nosotros
+  subprotocolo `[scheme, token]` — mismo efecto, no es gap.
+
+### Arquitectura y robustez
+- **Una conexión por fuente** (mic/system), igual que nuestro you/them.
+- **Segmentación**: acumulan interinos bajo un `chunkInProgressId` y cierran
+  en `is_final`. NO usan `speech_final` en reunión. El "una caja por turno
+  que crece" de su UI es AGRUPADO VISUAL de chunks consecutivos del mismo
+  hablante (nosotros: `groupCaptions` + orden por tsOffsetMs).
+- **KeepAlive cada 3 s** (idle de Deepgram ~10 s) → copiado (teníamos 8 s).
+- **`minUptime` 5 s**: el contador de reintentos solo se resetea si la
+  conexión aguanta 5 s abierta (anti-flapping) → copiado.
+- **Ping/pong con watchdog**: ping WS cada 10 s; >30 s sin pong →
+  `missing-pong` → dispara failover. Nosotros: solo stall por
+  `bufferedAmount` (no cubre half-open con poco audio). PENDIENTE (la API
+  WebSocket estándar no expone ping; requeriría `ws` de Node).
+- **FAILOVER entre proveedores en runtime** (deepgram ↔ assembly-universal):
+  ante `CONNECTION_ERROR`/`MAX_RETRIES_REACHED`/`missing-pong`, re-encolan el
+  audio en `_fallbackAudioQueue` y lo reproducen al proveedor nuevo;
+  presupuesto de 4 fallbacks por fuente. Nosotros ya tenemos los dos streams
+  con interfaz idéntica — falta el orquestador. PENDIENTE (el gap más valioso).
+- **Backlog en reconexión: Infinity** (`maxEnqueuedMessages=Infinity`,
+  vuelcan TODO al reconectar → priorizan completitud). Nosotros acotamos a
+  ~3 s a propósito (priorizamos tiempo real; el catch-up fue la causa del
+  delay con AssemblyAI). Decisión PROPIA, no copia de Granola.
+- **`Finalize`** (`{type:'Finalize'}`) para forzar el cierre del utterance en
+  curso sin cerrar el socket (AssemblyAI: `ForceEndpoint`). Nosotros usamos
+  `CloseStream` al pausar (el server igual finaliza lo pendiente). Opcional.
+- **Token**: cachean el token efímero (ventana 30 min, refresh 4 h) para no
+  pagar el fetch al reconectar; nosotros pedimos uno fresco por `connect()`
+  (más simple, ok salvo que el fetch agregue latencia perceptible).
+- **Telemetría**: sanity de timestamps (end<start, futuro, out-of-order),
+  confidence promedio por palabra, `recordBufferOverflow/Flush/Failover`,
+  watchdog "sin transcript en 30 s". Nosotros: solo logs de desfase. Opcional.

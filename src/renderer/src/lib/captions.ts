@@ -15,10 +15,15 @@ export interface CaptionGroup {
 }
 
 export function groupCaptions(captions: CaptionSegment[]): CaptionGroup[] {
+  // Orden por tiempo de audio, no de llegada: los dos canales (you/them)
+  // finalizan con lags distintos (~2-5 s cada uno), así que en vivo llegan
+  // entrelazados; sin ordenar, cada alternancia You/Them corta el bloque y
+  // quedan burbujas de una frase. Sort estable: los empates conservan llegada.
+  const ordered = [...captions].sort((a, b) => a.tsOffsetMs - b.tsOffsetMs)
   const groups: CaptionGroup[] = []
   let lastOffset = 0
   let lastChars = 0
-  for (const c of captions) {
+  for (const c of ordered) {
     const prev = groups[groups.length - 1]
     const sameSpeaker = prev && prev.speaker === c.speaker
     const closeInTime = c.tsOffsetMs - lastOffset <= GROUP_MAX_GAP_MS

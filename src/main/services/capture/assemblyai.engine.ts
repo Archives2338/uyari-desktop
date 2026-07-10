@@ -1,9 +1,11 @@
 import { BaseCaptureEngine, type CaptureStartOptions } from './engine'
-import { AssemblyAiStream, STREAM_SAMPLE_RATE, type SttTokenProvider } from './assemblyai.stream'
+import { STREAM_SAMPLE_RATE, type SttTokenProvider } from './assemblyai.stream'
+import { createSttStream, type SttStream, type SttProvider } from './stt-stream'
 import type { CaptionSegment, CaptureStatus } from '@shared/domain'
 
 // Motor "fase 2b": solo micrófono → un canal STT etiquetado "You".
-// Toda la lógica de conexión/resiliencia vive en AssemblyAiStream.
+// Toda la lógica de conexión/resiliencia vive en el stream (proveedor según
+// UYARI_STT, igual que el motor nativo).
 
 export const MIC_SAMPLE_RATE = STREAM_SAMPLE_RATE
 
@@ -15,14 +17,14 @@ export interface MicControlPort {
 export type { SttTokenProvider }
 
 export class AssemblyAiMicEngine extends BaseCaptureEngine {
-  private readonly stream: AssemblyAiStream
+  private readonly stream: SttStream
 
   constructor(
-    api: SttTokenProvider,
+    api: SttProvider,
     private readonly mic: MicControlPort,
   ) {
     super()
-    this.stream = new AssemblyAiStream(api, { speaker: 'You', channel: 'you' })
+    this.stream = createSttStream(api, { speaker: 'You', channel: 'you' })
     this.stream.on('segment', (s: CaptionSegment) => this.emitSegment(s))
     this.stream.on('status', (status: CaptureStatus, detail?: string) =>
       this.emitStatus(status, detail),

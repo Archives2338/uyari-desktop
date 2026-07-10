@@ -20,10 +20,12 @@ import type { StreamOptions } from './assemblyai.stream'
 //     actualizan en vivo; el final cierra el segmento.
 //   Cierre limpio: enviar {type:'CloseStream'} antes de close().
 //
-// Resiliencia con FILOSOFÍA TIEMPO-REAL (la lección de Granola:
-// maxEnqueuedMessages): el backlog es ACOTADO. Si la conexión se cae, al
-// reconectar mandamos a lo sumo unos segundos y descartamos lo viejo — nunca
-// el catch-up de segundos que hacía sentir el delay con AssemblyAI.
+// Resiliencia con FILOSOFÍA TIEMPO-REAL: el backlog es ACOTADO. Si la
+// conexión se cae, al reconectar mandamos a lo sumo unos segundos y
+// descartamos lo viejo — nunca el catch-up de segundos que hacía sentir el
+// delay con AssemblyAI. (Decisión PROPIA: Granola hace lo contrario —
+// maxEnqueuedMessages=Infinity, bufferea todo y lo vuelca al reconectar,
+// priorizando completitud; nosotros priorizamos vivir en tiempo real.)
 
 export const DG_SAMPLE_RATE = 16000
 const DG_URL = 'wss://api.deepgram.com/v1/listen'
@@ -33,7 +35,11 @@ const INITIAL_CONNECT_ATTEMPTS = 5
 // Backlog ACOTADO: máximo ~3 s. Preferimos perder un pedacito y quedar en
 // tiempo real a acumular delay (patrón Granola).
 const MAX_BACKLOG_CHUNKS = 60 // 3 s a chunks de 50 ms
-const KEEPALIVE_MS = 8000 // Deepgram cierra por inactividad a ~10 s
+const KEEPALIVE_MS = 3000 // Deepgram cierra por inactividad a ~10 s; 3 s (como Granola) deja margen a jitter/GC
+// Una conexión cuenta como "estable" (y resetea el backoff) solo si aguanta
+// abierta este tiempo. Sin esto, un socket que abre y cae al instante
+// martilla al proveedor siempre con el delay mínimo (patrón Granola: 5 s).
+const MIN_UPTIME_MS = 5000
 
 // Socket estancado (uplink caído sin que TCP lo note): bufferedAmount crece.
 const STALL_CHECK_MS = 2000
@@ -84,6 +90,7 @@ export class DeepgramStream extends EventEmitter {
   private keepaliveTimer: NodeJS.Timeout | null = null
   private stallTimer: NodeJS.Timeout | null = null
   private stallStrikes = 0
+  private uptimeTimer: NodeJS.Timeout | null = null
 
   constructor(
     private readonly api: DeepgramTokenProvider,
@@ -142,8 +149,9 @@ export class DeepgramStream extends EventEmitter {
     url.searchParams.set('channels', '1')
     url.searchParams.set('interim_results', 'true')
     url.searchParams.set('smart_format', 'true')
-    url.searchParams.set('endpointing', '300') // ms de silencio para cerrar turno
+    url.searchParams.set('endpointing', '100') // ms de silencio para cerrar turno (Granola usa 100 en multi)
     url.searchParams.set('no_delay', 'true') // menor latencia de parciales
+    url.searchParams.set('mip_opt_out', 'true') // Deepgram NO retiene/entrena con el audio (privacidad)
 
     await new Promise<void>((resolve, reject) => {
       // Token como subprotocolo (browser-safe, sin headers custom).
@@ -166,7 +174,13 @@ export class DeepgramStream extends EventEmitter {
         this.epoch += 1
         this.epochStartOffsetMs = Date.now() - this.captureStartMs
         this.epochAudioStarted = false
-        this.reconnectAttempt = 0
+        // El backoff se resetea solo si la conexión demuestra estabilidad
+        // (MIN_UPTIME_MS abierta), no en el open: un socket que abre y cae
+        // al instante debe seguir escalando el delay.
+        if (this.uptimeTimer) clearTimeout(this.uptimeTimer)
+        this.uptimeTimer = setTimeout(() => {
+          this.reconnectAttempt = 0
+        }, MIN_UPTIME_MS)
         this.segSeq = 0
         console.log(`${this.tag()} WebSocket abierto (época ${this.epoch})`)
         this.flushBacklog()
@@ -258,8 +272,10 @@ export class DeepgramStream extends EventEmitter {
     if (this.stopping) return
     if (this.keepaliveTimer) clearInterval(this.keepaliveTimer)
     if (this.stallTimer) clearInterval(this.stallTimer)
+    if (this.uptimeTimer) clearTimeout(this.uptimeTimer)
     this.keepaliveTimer = null
     this.stallTimer = null
+    this.uptimeTimer = null
     this.ws = null
     console.warn(`${this.tag()} conexión perdida (${detail}), reintentando…`)
     this.emit('status', 'reconnecting' satisfies CaptureStatus, detail)
@@ -287,9 +303,11 @@ export class DeepgramStream extends EventEmitter {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
     if (this.keepaliveTimer) clearInterval(this.keepaliveTimer)
     if (this.stallTimer) clearInterval(this.stallTimer)
+    if (this.uptimeTimer) clearTimeout(this.uptimeTimer)
     this.reconnectTimer = null
     this.keepaliveTimer = null
     this.stallTimer = null
+    this.uptimeTimer = null
     console.warn(`${this.tag()} ${QUOTA_MESSAGE}`)
     this.emit('status', 'error' satisfies CaptureStatus, QUOTA_MESSAGE)
   }
@@ -363,9 +381,11 @@ export class DeepgramStream extends EventEmitter {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
     if (this.keepaliveTimer) clearInterval(this.keepaliveTimer)
     if (this.stallTimer) clearInterval(this.stallTimer)
+    if (this.uptimeTimer) clearTimeout(this.uptimeTimer)
     this.reconnectTimer = null
     this.keepaliveTimer = null
     this.stallTimer = null
+    this.uptimeTimer = null
 
     const ws = this.ws
     this.ws = null

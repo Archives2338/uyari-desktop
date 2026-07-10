@@ -2,9 +2,10 @@ import { spawn, type ChildProcessByStdio } from 'node:child_process'
 import type { Readable, Writable } from 'node:stream'
 import { helperPath } from './helper-path'
 import { BaseCaptureEngine, type CaptureStartOptions } from './engine'
-import { AssemblyAiStream, STREAM_SAMPLE_RATE } from './assemblyai.stream'
+import { STREAM_SAMPLE_RATE } from './assemblyai.stream'
+import { createSttStream, type SttStream, type SttProvider } from './stt-stream'
 import type { CaptionSegment, CaptureStatus } from '@shared/domain'
-import type { MicControlPort, SttTokenProvider } from './assemblyai.engine'
+import type { MicControlPort } from './assemblyai.engine'
 
 // Motor "fase 2c": DOS canales STT con separación de hablantes de fábrica.
 //   - "You"  → micrófono capturado por el helper con voice processing
@@ -24,9 +25,43 @@ const PCM_BYTES = 1600 // 800 samples * 2 = 50 ms
 const FRAME_BYTES = 1 + PCM_BYTES
 const CHANNEL_MIC = 0
 
+// --- Dedup textual de eco (la red final, determinística) ---
+// El AEC + gate eliminan la mayoría del eco acústico, pero a volumen alto
+// de parlantes pueden fugarse ráfagas que el STT transcribe. El eco tiene
+// una firma inconfundible A NIVEL DE TEXTO: produce las MISMAS palabras que
+// el canal del sistema. Si un turno de "You" es mayormente un subconjunto
+// de lo que "Them" dijo en la ventana reciente, es eco → se descarta antes
+// de emitir. Ataca el síntoma exactamente donde importa (el transcript) sin
+// depender de la física del audio.
+
+const ECHO_TEXT_WINDOW_MS = 30_000
+
+// Palabras función del español/inglés: no cuentan como evidencia de eco
+// (coinciden entre hablantes por azar). Solo las palabras de contenido votan.
+const STOPWORDS = new Set(
+  ('de la que el en y a los se del las un por con no una su para es al lo como ' +
+    'mas pero sus le ya o este si porque esta entre cuando muy sin sobre tambien ' +
+    'me hasta hay donde quien desde todo nos durante todos uno les ni contra ' +
+    'otros ese eso ante ellos e esto mi antes algunos que unos yo otro otras otra ' +
+    'el tanto esa estos mucho quienes nada muchos cual poco ella estar estas ' +
+    'algunas algo nosotros the a an and or but if of to in on for with at by ' +
+    'is are was were be been it this that these those i you he she we they').split(' '),
+)
+
+/** Tokens de contenido normalizados (minúsculas, sin tildes ni puntuación). */
+function contentTokens(text: string): string[] {
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9ñ\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 1 && !STOPWORDS.has(w))
+}
+
 export class NativeCaptureEngine extends BaseCaptureEngine {
-  private readonly you: AssemblyAiStream
-  private readonly them: AssemblyAiStream
+  private readonly you: SttStream
+  private readonly them: SttStream
   private helper: ChildProcessByStdio<Writable, Readable, Readable> | null = null
   private stdoutRemainder: Buffer = Buffer.alloc(0)
   private stopping = false
@@ -39,22 +74,126 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
   private statusByChannel = new Map<string, CaptureStatus>()
 
   constructor(
-    api: SttTokenProvider,
+    api: SttProvider,
     private readonly mic: MicControlPort,
   ) {
     super()
-    this.you = new AssemblyAiStream(api, { speaker: 'You', channel: 'you' })
-    this.them = new AssemblyAiStream(api, { speaker: 'Them', channel: 'them' })
+    this.you = createSttStream(api, { speaker: 'You', channel: 'you' })
+    this.them = createSttStream(api, { speaker: 'Them', channel: 'them' })
     for (const [channel, stream] of [
       ['you', this.you],
       ['them', this.them],
     ] as const) {
-      stream.on('segment', (s: CaptionSegment) => this.emitSegment(s))
+      stream.on('segment', (s: CaptionSegment) => {
+        if (channel === 'them') {
+          // Referencia para el dedup: TODAS las versiones del turno (los
+          // parciales llegan en ~1s, mucho antes de que el eco finalice).
+          this.rememberThemText(s.text)
+          this.emitSegment(s)
+          return
+        }
+        // Filtro a NIVEL DE PALABRAS (QA 8): con video continuo el STT abre
+        // turnos de 30s+ donde conviven el eco y la voz del usuario —
+        // descartar el turno entero se tragaba su voz. Se remueven solo las
+        // rachas que calcan a Them; lo demás (la voz) sobrevive.
+        const filtered = this.filterEchoText(s.text)
+        if (filtered !== s.text) {
+          console.log(
+            `[echo-dedup] You filtrado: "${s.text.slice(0, 60)}" → "${filtered.slice(0, 60) || '∅'}"`,
+          )
+        }
+        if (filtered !== '') {
+          this.emittedYou.add(s.providerMessageId)
+          this.emitSegment({ ...s, text: filtered })
+        } else if (this.emittedYou.has(s.providerMessageId)) {
+          // Una versión temprana de este turno ya se pintó y ahora quedó
+          // vacío: RETRACTAR (texto vacío = remover, ver upsertCaption).
+          this.emitSegment({ ...s, text: '' })
+        }
+      })
       stream.on('status', (status: CaptureStatus, detail?: string) => {
         this.statusByChannel.set(channel, status)
         this.emitAggregateStatus(detail)
       })
     }
+  }
+
+  // Textos recientes del canal sistema (tokens de contenido + timestamp).
+  private themRecent: Array<{ tokens: Set<string>; at: number }> = []
+  // Turnos de You cuya versión ya se emitió (para poder retractarlos si una
+  // versión posterior queda vacía tras el filtro).
+  private emittedYou = new Set<string>()
+
+  private rememberThemText(text: string): void {
+    const tokens = new Set(contentTokens(text))
+    if (tokens.size === 0) return
+    const now = Date.now()
+    this.themRecent.push({ tokens, at: now })
+    while (this.themRecent.length > 0 && now - this.themRecent[0].at > ECHO_TEXT_WINDOW_MS) {
+      this.themRecent.shift()
+    }
+  }
+
+  /**
+   * Remueve del texto las RACHAS de palabras que calcan lo que "Them" dijo
+   * en la ventana reciente (eco), conservando el resto (la voz del usuario).
+   * Una racha = tramo contiguo sin palabras de contenido no-coincidentes,
+   * con ≥3 coincidencias de contenido (3+ calcos seguidos no son azar; las
+   * stopwords intermedias acompañan a la racha). Devuelve '' si no queda
+   * contenido real — el turno era eco puro.
+   */
+  private filterEchoText(text: string): string {
+    const now = Date.now()
+    const seen = new Set<string>()
+    for (const entry of this.themRecent) {
+      if (now - entry.at <= ECHO_TEXT_WINDOW_MS) {
+        for (const w of entry.tokens) seen.add(w)
+      }
+    }
+    if (seen.size === 0) return text
+
+    const raw = text.split(/\s+/).filter(Boolean)
+    const norm = (t: string): string =>
+      t
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[̀-ͯ]/g, '')
+        .replace(/[^a-z0-9ñ]/g, '')
+    const info = raw.map((token) => {
+      const n = norm(token)
+      const content = n.length > 1 && !STOPWORDS.has(n)
+      return { content, match: content && seen.has(n) }
+    })
+
+    const remove = new Array<boolean>(raw.length).fill(false)
+    let i = 0
+    while (i < raw.length) {
+      if (info[i].content && !info[i].match) {
+        i += 1
+        continue
+      }
+      // Tramo contiguo de coincidencias + stopwords (sin contenido ajeno).
+      let j = i
+      let matches = 0
+      while (j < raw.length && !(info[j].content && !info[j].match)) {
+        if (info[j].match) matches += 1
+        j += 1
+      }
+      if (matches >= 3) {
+        for (let k = i; k < j; k++) remove[k] = true
+      }
+      i = j
+    }
+
+    const kept = raw.filter((_, k) => !remove[k]).join(' ').trim()
+    const removedAny = remove.some(Boolean)
+    const keptContent = contentTokens(kept).length
+    // Restos de un turno mayormente removido (≤2 palabras de contenido tras
+    // quitar una racha) = migajas del eco que el STT transcribió con
+    // variantes ("reserva" por "reservado"): eco puro. Sin remoción, textos
+    // cortos pasan intactos ("ok", "sí claro").
+    if (keptContent === 0 || (removedAny && keptContent <= 2)) return ''
+    return kept
   }
 
   /**
@@ -76,15 +215,35 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
   async start(opts?: CaptureStartOptions): Promise<void> {
     this.stopping = false
     this.micReady = false
-    // El canal del mic es el principal: si su STT falla, la sesión falla.
-    await this.you.start(opts)
+    // TODO EN PARALELO (mismo patrón que resumeCapture): start() marca cada
+    // stream como receptivo de forma SÍNCRONA antes de conectar, así el
+    // helper arranca YA y sus frames esperan en el backlog mientras los WS
+    // abren. Serializar (token+WS you → token+WS them → helper) costaba
+    // ~1-2 s extra de "Starting microphone…" en cada arranque.
+    const youStarted = this.you.start(opts)
+    const themStarted = this.them.start(opts)
+    this.spawnHelper()
     try {
-      await this.them.start(opts)
-      this.spawnHelper()
+      // El canal del mic es el principal: si su STT falla, la sesión falla.
+      await youStarted
+    } catch (err) {
+      void themStarted.catch(() => {})
+      this.stopping = true
+      await this.killHelper()
+      await Promise.all([this.you.stop(), this.them.stop()])
+      throw err
+    }
+    try {
+      await themStarted
     } catch (err) {
       console.error('[native] canal de sistema no disponible:', err)
       await this.them.stop()
-      this.fallbackToRendererMic('System audio unavailable — only your microphone is being transcribed.')
+      this.statusByChannel.delete('them')
+      // El helper sigue vivo: el mic nativo (AEC3) es muy superior al del
+      // renderer; solo se pierde la transcripción del audio de sistema.
+      this.emitAggregateStatus(
+        'System audio unavailable — only your microphone is being transcribed.',
+      )
     }
   }
 
@@ -178,6 +337,13 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
     }
   }
 
+  // Reintentos de respawn del helper en esta sesión. El helper es MUY
+  // superior al fallback (AEC3 + gate + audio de sistema); un crash puntual
+  // no debe degradar la sesión entera a mic-sin-AEC. Granola hace lo mismo
+  // (reinician su audio_process; flags system_audio_dropout_restart y
+  // max_memory_restart en su config).
+  private helperRespawns = 0
+
   private onHelperGone(reason: string): void {
     console.error('[native] helper de audio caído:', reason)
     this.helper = null
@@ -185,6 +351,14 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
     // en pausa — encender el mic con la UI en "pausa" sería un bug de
     // confianza). El resume respawnea un helper limpio.
     if (this.paused) return
+    if (this.helperRespawns < 2) {
+      this.helperRespawns += 1
+      console.warn(`[native] respawneando helper (intento ${this.helperRespawns}/2)`)
+      this.spawnHelper()
+      return
+    }
+    // Crashes repetidos: recién ahí degradar al mic del renderer (sin AEC),
+    // que al menos mantiene la sesión viva.
     void this.them.stop()
     this.fallbackToRendererMic(
       'System audio stopped — check System Audio Recording permission. Your microphone keeps working.',
@@ -213,34 +387,39 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
     if (this.rendererMicActive) this.you.acceptAudio(chunk)
   }
 
+  /**
+   * Mata al helper y ESPERA a que muera antes de resolver: si el usuario
+   * hace stop→start rápido, dos motores de voz conviviendo dejan mudo el
+   * mic de la sesión nueva.
+   */
+  private async killHelper(): Promise<void> {
+    const helper = this.helper
+    if (!helper) return
+    this.helper = null
+    await new Promise<void>((resolve) => {
+      const done = (): void => resolve()
+      helper.once('exit', done)
+      try {
+        helper.stdin.end() // salida limpia (EOF)
+      } catch {
+        // seguir con el kill
+      }
+      setTimeout(() => helper.kill('SIGTERM'), 300)
+      setTimeout(() => {
+        helper.removeListener('exit', done)
+        helper.kill('SIGKILL')
+        resolve()
+      }, 1200)
+    })
+  }
+
   async stop(): Promise<void> {
     this.stopping = true
     if (this.rendererMicActive) {
       this.mic.stop()
       this.rendererMicActive = false
     }
-    if (this.helper) {
-      // ESPERAR a que el helper muera antes de resolver: si el usuario
-      // hace stop→start rápido, dos motores de voz conviviendo dejan mudo
-      // el mic de la sesión nueva.
-      const helper = this.helper
-      this.helper = null
-      await new Promise<void>((resolve) => {
-        const done = (): void => resolve()
-        helper.once('exit', done)
-        try {
-          helper.stdin.end() // salida limpia (EOF)
-        } catch {
-          // seguir con el kill
-        }
-        setTimeout(() => helper.kill('SIGTERM'), 300)
-        setTimeout(() => {
-          helper.removeListener('exit', done)
-          helper.kill('SIGKILL')
-          resolve()
-        }, 1200)
-      })
-    }
+    await this.killHelper()
     await Promise.all([this.you.stop(), this.them.stop()])
     this.emitStatus('idle')
   }

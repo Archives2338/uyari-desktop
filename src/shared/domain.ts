@@ -83,6 +83,8 @@ export interface MeetingDetailData {
   endedAt?: string | null
   summary: MeetingSummary | null
   segments: TranscriptSegmentRow[]
+  /** Notas editables del usuario (Fase 5a, el scratchpad). null = vacías. */
+  userNotes?: string | null
 }
 
 export interface MeetingListItem {
@@ -100,4 +102,18 @@ export interface MeetingListItem {
 export interface MeetingListPage {
   items: MeetingListItem[]
   nextCursor: string | null
+}
+
+// "Pregúntale a Uyari" global (chat, no ligado a una reunión abierta).
+export interface AskAllCitation {
+  clientSessionId: string
+  title: string | null
+  occurredAt: string
+  actionItems: string[]
+}
+
+export interface AskAllResponse {
+  answer: string
+  citations: AskAllCitation[]
+  followUps: string[]
 }

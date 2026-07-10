@@ -15,10 +15,15 @@ export interface CaptionGroup {
 }
 
 export function groupCaptions(captions: CaptionSegment[]): CaptionGroup[] {
+  // Orden por tiempo de audio, no de llegada: los dos canales (you/them)
+  // finalizan con lags distintos (~2-5 s cada uno), así que en vivo llegan
+  // entrelazados; sin ordenar, cada alternancia You/Them corta el bloque y
+  // quedan burbujas de una frase. Sort estable: los empates conservan llegada.
+  const ordered = [...captions].sort((a, b) => a.tsOffsetMs - b.tsOffsetMs)
   const groups: CaptionGroup[] = []
   let lastOffset = 0
   let lastChars = 0
-  for (const c of captions) {
+  for (const c of ordered) {
     const prev = groups[groups.length - 1]
     const sameSpeaker = prev && prev.speaker === c.speaker
     const closeInTime = c.tsOffsetMs - lastOffset <= GROUP_MAX_GAP_MS
@@ -34,9 +39,16 @@ export function groupCaptions(captions: CaptionSegment[]): CaptionGroup[] {
   return groups
 }
 
-/** Dedupe por providerMessageId: la versión más nueva pisa a la anterior. */
+/**
+ * Dedupe por providerMessageId: la versión más nueva pisa a la anterior.
+ * Texto VACÍO = retracción (el dedup de eco descartó un turno cuya versión
+ * temprana ya se había pintado): se remueve de la lista.
+ */
 export function upsertCaption(list: CaptionSegment[], segment: CaptionSegment): CaptionSegment[] {
   const idx = list.findIndex((c) => c.providerMessageId === segment.providerMessageId)
+  if (segment.text === '') {
+    return idx >= 0 ? [...list.slice(0, idx), ...list.slice(idx + 1)] : list
+  }
   if (idx >= 0) {
     const next = list.slice()
     next[idx] = segment

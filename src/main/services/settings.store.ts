@@ -62,10 +62,16 @@ export class SettingsStore {
     const buf = Buffer.from(raw, 'base64')
     // El formato se detecta por contenido, no por modo: safeStorage de
     // Chromium antepone el magic "v10"/"v11" al ciphertext; un JWT en
-    // claro jamás empieza así. Así una sesión guardada cifrada antes de
-    // este cambio sigue siendo legible en dev (un último prompt) y el
-    // próximo login la reescribe en el formato del modo actual.
+    // claro jamás empieza así.
     const encrypted = buf.subarray(0, 3).toString('latin1').startsWith('v1')
+    if (encrypted && !this.useKeychain()) {
+      // Sesión cifrada de ANTES del cambio a claro-en-dev: intentar
+      // descifrarla dispararía el prompt del llavero en CADA lectura (y con
+      // el mock keychain de dev fallaría igual). Descartarla una sola vez;
+      // el usuario re-loguea y queda en el formato actual.
+      this.clearSession()
+      return undefined
+    }
     try {
       return encrypted ? safeStorage.decryptString(buf) : buf.toString('utf8')
     } catch {

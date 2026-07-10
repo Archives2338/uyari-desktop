@@ -511,7 +511,6 @@ body {
 
 /* Home: historial de reuniones pasadas (quick win #2). */
 .home-meetings {
-  margin-top: 32px;
   display: flex;
   flex-direction: column;
 }
@@ -534,12 +533,12 @@ body {
 }
 
 .home-meeting-icon {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   flex-shrink: 0;
-  border-radius: 9px;
+  border-radius: 8px;
   background: var(--surface-sunken);
-  color: var(--ink-3);
+  color: var(--accent-strong);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -651,6 +650,51 @@ body {
 .detail-badge-failed {
   color: #e5484d;
   background: var(--surface-sunken);
+}
+
+/* Notas editables del usuario (Fase 5a) — arriba del resumen IA, como
+   Granola: tus notas primero, la IA convive debajo. */
+.detail-notes {
+  margin-bottom: 24px;
+}
+
+.detail-notes-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.detail-notes-status {
+  font: var(--text-xs);
+  color: var(--ink-4);
+}
+
+.detail-notes-area {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 88px;
+  field-sizing: content; /* auto-crece con el contenido (Chromium 123+/Electron 38) */
+  resize: vertical;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  font: var(--text-md);
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--ink);
+  outline: none;
+  font-family: inherit;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+
+.detail-notes-area:focus {
+  border-color: var(--border-strong);
+}
+
+.detail-notes-area::placeholder {
+  color: var(--ink-4);
 }
 
 .detail-summary {
@@ -803,4 +847,261 @@ body {
 
 .detail-ask-input::placeholder {
   color: var(--ink-4);
+}
+
+/* "Pregúntale a Uyari" — módulo de chat global (CH1 home + CH2 conversación). */
+.ask-textarea {
+  width: 100%;
+  resize: none;
+  background: none;
+  border: none;
+  outline: none;
+  font: var(--text-md);
+  color: var(--ink);
+  padding: 4px 2px;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.ask-textarea::placeholder {
+  color: var(--ink-4);
+}
+
+/* Selector de alcance: <select> real (accesible, funcional) con chrome
+   nativo apagado + chevron propio superpuesto — pill visual, sin perder
+   la interacción nativa (evita reconstruir un dropdown a mano). */
+.ask-scope-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.ask-scope-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--ink-2);
+  font: var(--text-xs);
+  font-weight: 500;
+  padding: 7px 22px 7px 12px;
+  cursor: pointer;
+  max-width: 170px;
+  text-overflow: ellipsis;
+}
+
+.ask-scope-chevron {
+  position: absolute;
+  right: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--ink-3);
+  font-size: 9px;
+}
+
+.ask-send-btn {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: none;
+  background: var(--violet);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.ask-send-btn:disabled {
+  background: var(--surface-sunken);
+  color: var(--ink-4);
+  cursor: default;
+}
+
+.ask-recent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 4px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.ask-recent-row:hover {
+  background: var(--violet-wash);
+}
+
+.ask-recent-row:last-child {
+  border-bottom: none;
+}
+
+.ask-recent-icon {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  background: var(--surface-sunken);
+  color: var(--accent-strong);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ask-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 8px 13px;
+  font: var(--text-xs);
+  font-weight: 500;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.ask-chip:hover {
+  background: var(--violet-wash);
+  border-color: var(--violet-soft);
+  color: var(--text-heading);
+}
+
+.ask-chip svg {
+  color: var(--accent-strong);
+}
+
+/* Estado "pensando" (patrón Claude Code): la pregunta aparece al toque
+   (optimista) y el flame late en escala+opacidad mientras se espera la
+   respuesta — sin esto el click se siente muerto. Los puntos "..." y las
+   palabras rotando son JS (Thinking en AskUyari.tsx), no CSS. */
+.ask-flame-pulse {
+  animation: ask-uyari-think 1.1s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes ask-uyari-think {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 1;
+  }
+}
+
+/* Firma de la flama al final de la respuesta (FlameSign): hover revela el
+   saludo, click hace un squish con rebote. Transform/opacity inline
+   (estado de React), la transición vive acá para no repetirla. */
+.ask-flame-sign-btn {
+  display: inline-flex;
+  cursor: pointer;
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.ask-flame-sign-hello {
+  font: var(--text-sm);
+  color: var(--text-muted);
+  transition: opacity 200ms ease, transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+}
+
+/* Pregunta del usuario: neutro (sunken), nunca violeta — el usuario no es
+   la marca (regla del handoff). */
+.ask-question-bubble {
+  align-self: flex-end;
+  max-width: 75%;
+  background: var(--surface-sunken);
+  color: var(--text-heading);
+  font: var(--text-sm);
+  line-height: 1.5;
+  border-radius: 16px 16px 4px 16px;
+  padding: 12px 16px;
+}
+
+.ask-citation-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 10px 13px;
+}
+
+.ask-citation-title {
+  flex: 1;
+  min-width: 0;
+  font: var(--label-sm);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-heading);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ask-citation-meta {
+  font: var(--text-xs);
+  font-weight: 400;
+  color: var(--ink-4);
+}
+
+.ask-citation-open {
+  margin-left: auto;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: var(--label-sm);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-strong);
+  padding: 0;
+  white-space: nowrap;
+}
+
+.ask-citation-open:hover {
+  text-decoration: underline;
+}
+
+.ask-action-items {
+  background: var(--surface-sunken);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.ask-action-item-box {
+  width: 15px;
+  height: 15px;
+  border-radius: 5px;
+  border: 1.5px solid var(--border-strong);
+  box-sizing: border-box;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.ask-answer-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: var(--text-xs);
+  font-weight: 500;
+  color: var(--ink-4);
+  padding: 0;
+}
+
+.ask-answer-action:hover {
+  color: var(--text-heading);
 }

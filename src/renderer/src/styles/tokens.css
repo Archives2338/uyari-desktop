@@ -18,7 +18,8 @@
 }
 :root {
   /* ── Base palette ── */
-  --paper: #FCFCFB;            /* dominant background — warm near-white */
+  --sidebar: #F5F3EE;          /* rail — paper tostado, contraste vs main */
+  --paper: #FDFDFB;            /* dominant background — casi blanco */
   --ink: #1E1B2E;              /* deep indigo — headlines + body */
   --black: #111111;            /* primary CTA fill */
   --black-hover: #2B2B2B;      /* CTA hover */
@@ -43,10 +44,10 @@
   --ink-2: #4E4A63;            /* secondary text */
   --ink-3: #817D93;            /* muted text, captions */
   --ink-4: #B4B1C2;            /* placeholders, disabled text */
-  --border: #E9E8EF;           /* hairlines, dividers */
-  --border-strong: #D9D7E2;    /* input borders */
+  --border: #E7E5DE;           /* hairlines, dividers */
+  --border-strong: #D9D6CC;    /* input borders */
   --surface: #FFFFFF;          /* cards on paper */
-  --surface-sunken: #F5F5F3;   /* wells, code, disabled fills */
+  --surface-sunken: #ECEAE3;   /* wells, code, disabled fills, item activo */
 
   /* ── Semantic aliases ── */
   --text-heading: var(--ink);

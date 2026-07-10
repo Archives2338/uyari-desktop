@@ -1,4 +1,5 @@
 import type {
+  AskAllResponse,
   CaptionSegment,
   MeetingDetailData,
   MeetingListPage,
@@ -19,6 +20,13 @@ export class ApiError extends Error {
   ) {
     super(message)
   }
+}
+
+interface DeepgramTokenResponse {
+  provider: 'deepgram'
+  token: string
+  expiresInSeconds: number
+  ephemeral: boolean
 }
 
 /** El plan del usuario agotó su cuota mensual de transcripción (STT). */
@@ -86,6 +94,54 @@ export class ApiClient {
     }
   }
 
+  private dgToken: { value: DeepgramTokenResponse; expiresAt: number } | null = null
+  private dgTokenInflight: Promise<DeepgramTokenResponse> | null = null
+
+  /**
+   * Token de Deepgram para el subprotocolo del WebSocket. `ephemeral` decide
+   * el esquema: JWT del grant → 'bearer'; API key directa (fallback dev) →
+   * 'token' (ver deepgram.stream.ts).
+   *
+   * CACHEADO con margen de 60 s (patrón Granola): los dos canales (you/them)
+   * arrancan a la vez y compartían destino — sin caché eran 2 round-trips al
+   * backend (+ grant de Deepgram) en el camino crítico del primer texto, y
+   * uno más en cada reconexión.
+   */
+  async deepgramToken(): Promise<DeepgramTokenResponse> {
+    if (this.dgToken && Date.now() < this.dgToken.expiresAt) return this.dgToken.value
+    if (this.dgTokenInflight) return this.dgTokenInflight
+    this.dgTokenInflight = (async () => {
+      try {
+        const fresh = await this.request<DeepgramTokenResponse>('/stt/deepgram-token', {
+          method: 'POST',
+          body: '{}',
+        })
+        this.dgToken = {
+          value: fresh,
+          expiresAt: Date.now() + Math.max(0, fresh.expiresInSeconds - 60) * 1000,
+        }
+        return fresh
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 402) throw new SttQuotaError()
+        throw err
+      } finally {
+        this.dgTokenInflight = null
+      }
+    })()
+    return this.dgTokenInflight
+  }
+
+  /**
+   * Precalienta el token de STT (fire-and-forget) al detectar una reunión,
+   * ANTES de que el usuario pulse grabar: el fetch sale del camino crítico
+   * del arranque. Solo Deepgram — el token de AssemblyAI es de un solo uso.
+   * Sin sesión o sin cuota: silencioso, el error real saldrá al grabar.
+   */
+  prefetchSttToken(): void {
+    if (process.env.UYARI_STT === 'assemblyai') return
+    void this.deepgramToken().catch(() => {})
+  }
+
   /** Reporta segundos de STT consumidos (best-effort; medición del plan). */
   reportSttUsage(seconds: number): Promise<{ ok: boolean }> {
     return this.request('/stt/usage', { method: 'POST', body: JSON.stringify({ seconds }) })
@@ -95,6 +151,19 @@ export class ApiClient {
     return this.request(`/meetings/${clientSessionId}/ask`, {
       method: 'POST',
       body: JSON.stringify({ question }),
+    })
+  }
+
+  /** Chat global ("Pregúntale a Uyari"): contra el historial, con citas.
+   *  `history` = turnos previos del mismo hilo (contexto de conversación). */
+  askAll(
+    question: string,
+    meetingIds?: string[],
+    history?: Array<{ question: string; answer: string }>,
+  ): Promise<AskAllResponse> {
+    return this.request('/meetings/ask', {
+      method: 'POST',
+      body: JSON.stringify({ question, meetingIds, history }),
     })
   }
 
@@ -110,6 +179,14 @@ export class ApiClient {
   /** Detalle completo: transcript + resumen (o 404 si nunca se ingirió nada). */
   getMeeting(clientSessionId: string): Promise<MeetingDetailData> {
     return this.request(`/meetings/${clientSessionId}`)
+  }
+
+  /** Guarda las notas editables del usuario (el scratchpad, Fase 5a). */
+  saveNotes(clientSessionId: string, userNotes: string): Promise<{ ok: boolean }> {
+    return this.request(`/meetings/${clientSessionId}/notes`, {
+      method: 'PUT',
+      body: JSON.stringify({ userNotes }),
+    })
   }
 
   /** Activa (idempotente) el link público y devuelve la URL para compartir. */

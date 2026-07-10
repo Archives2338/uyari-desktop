@@ -9,7 +9,7 @@
     "dev": "env -u ELECTRON_RUN_AS_NODE electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "build:helper": "swiftc -O -o native/bin/uyari-audio-helper native/audio-helper/main.swift",
+    "build:helper": "bash native/scripts/build-helper.sh",
     "postinstall": "/usr/libexec/PlistBuddy -c 'Add :NSAudioCaptureUsageDescription string Uyari captures meeting audio to transcribe it.' node_modules/electron/dist/Electron.app/Contents/Info.plist 2>/dev/null || true",
     "package": "npm run build:helper && electron-vite build && electron-builder --mac --dir"
   },

@@ -14,7 +14,7 @@ interface Services {
   api: ApiClient
   meetings: MeetingService
   /** Gestión de ventana del nub flotante — sin lógica de negocio. */
-  overlay: { drag(action: 'start' | 'end'): void; focusMain(): void }
+  overlay: { drag(action: 'start' | 'end'): void; focusMain(): void; openAsk(): void }
 }
 
 export function registerIpc({ settings, api, meetings, overlay }: Services): void {
@@ -46,8 +46,16 @@ export function registerIpc({ settings, api, meetings, overlay }: Services): voi
     api.listMeetings(params),
   )
   ipcMain.handle(IPC.meetingsGet, (_e, clientSessionId: string) => api.getMeeting(clientSessionId))
+  ipcMain.handle(IPC.meetingsSaveNotes, (_e, clientSessionId: string, userNotes: string) =>
+    api.saveNotes(clientSessionId, userNotes),
+  )
   ipcMain.handle(IPC.meetingsAsk, (_e, clientSessionId: string, question: string) =>
     api.ask(clientSessionId, question),
+  )
+  ipcMain.handle(
+    IPC.meetingsAskAll,
+    (_e, question: string, meetingIds?: string[], history?: Array<{ question: string; answer: string }>) =>
+      api.askAll(question, meetingIds, history),
   )
   ipcMain.handle(IPC.meetingsShare, (_e, clientSessionId: string) => api.share(clientSessionId))
 
@@ -58,4 +66,5 @@ export function registerIpc({ settings, api, meetings, overlay }: Services): voi
   ipcMain.on(IPC.netStatus, (_e, online: boolean) => meetings.setNetworkOnline(online))
   ipcMain.on(IPC.overlayDrag, (_e, action: 'start' | 'end') => overlay.drag(action))
   ipcMain.on(IPC.overlayFocusMain, () => overlay.focusMain())
+  ipcMain.on(IPC.overlayOpenAsk, () => overlay.openAsk())
 }

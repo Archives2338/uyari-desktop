@@ -13,6 +13,8 @@ interface AppStore {
   detectedMeeting: string | null
   /** clientSessionId abierto en MeetingDetail; null = se ve el Home. */
   openMeetingId: string | null
+  /** "Pregúntale a Uyari" (chat global) está abierto. */
+  askOpen: boolean
 
   refreshAuth(): Promise<void>
   refreshPermissions(): Promise<void>
@@ -26,6 +28,8 @@ interface AppStore {
   setDetectedMeeting(label: string | null): void
   openMeeting(clientSessionId: string): void
   closeMeeting(): void
+  openAsk(): void
+  closeAsk(): void
 }
 
 export const useApp = create<AppStore>((set, get) => ({
@@ -35,6 +39,7 @@ export const useApp = create<AppStore>((set, get) => ({
   captions: [],
   detectedMeeting: null,
   openMeetingId: null,
+  askOpen: false,
 
   refreshAuth: async () => set({ auth: await window.uyari.auth.state() }),
   refreshPermissions: async () => set({ permissions: await window.uyari.permissions.status() }),
@@ -69,7 +74,12 @@ export const useApp = create<AppStore>((set, get) => ({
   pushCaption: (segment) =>
     set((s) => {
       // Dedupe por providerMessageId: una versión más nueva pisa la anterior.
+      // Texto vacío = retracción (dedup de eco): se remueve de la vista.
       const idx = s.captions.findIndex((c) => c.providerMessageId === segment.providerMessageId)
+      if (segment.text === '') {
+        if (idx < 0) return {}
+        return { captions: [...s.captions.slice(0, idx), ...s.captions.slice(idx + 1)] }
+      }
       if (idx >= 0) {
         const next = s.captions.slice()
         next[idx] = segment
@@ -82,6 +92,10 @@ export const useApp = create<AppStore>((set, get) => ({
 
   setDetectedMeeting: (label) => set({ detectedMeeting: label }),
 
-  openMeeting: (clientSessionId) => set({ openMeetingId: clientSessionId }),
+  // openMeetingId, askOpen: dos "pantallas" mutuamente excluyentes sobre el
+  // Home — abrir una cierra la otra (mismo patrón que un router simple).
+  openMeeting: (clientSessionId) => set({ openMeetingId: clientSessionId, askOpen: false }),
   closeMeeting: () => set({ openMeetingId: null }),
+  openAsk: () => set({ openMeetingId: null, askOpen: true }),
+  closeAsk: () => set({ askOpen: false }),
 }))

@@ -1,4 +1,5 @@
 import type {
+  AskAllResponse,
   AuthState,
   CaptionSegment,
   MeetingDetailData,
@@ -27,7 +28,10 @@ export const IPC = {
   captureState: 'capture:state',
   meetingsList: 'meetings:list',
   meetingsGet: 'meetings:get',
+  meetingsSaveNotes: 'meetings:save-notes',
   meetingsAsk: 'meetings:ask',
+  /** "Pregúntale a Uyari" global — contra el historial, con citas. */
+  meetingsAskAll: 'meetings:ask-all',
   meetingsShare: 'meetings:share',
   // renderer → main (fire-and-forget, alto volumen)
   micChunk: 'mic:chunk',
@@ -39,6 +43,9 @@ export const IPC = {
   // renderer → main: el nub pide traer la ventana principal al frente
   // (tap en "Pregúntale a Uyari" — las respuestas se abren en la app)
   overlayFocusMain: 'overlay:focus-main',
+  // renderer → main: igual que overlayFocusMain, pero además navega a la
+  // pantalla de chat (el overlay nunca renderiza respuestas, solo abre ahí).
+  overlayOpenAsk: 'overlay:open-ask',
   // main → renderer (push)
   evCaption: 'ev:caption',
   evSession: 'ev:session',
@@ -47,6 +54,8 @@ export const IPC = {
   // El main calculó el hover del nub (posición global del cursor) y decide
   // cuándo expandir/colapsar; el renderer solo pinta.
   evNubExpanded: 'ev:nub-expanded',
+  /** La ventana principal debe abrir "Pregúntale a Uyari" (viene del nub). */
+  evOpenAsk: 'ev:open-ask',
 } as const
 
 // Superficie que el preload expone como window.uyari.
@@ -74,7 +83,18 @@ export interface UyariBridge {
   meetings: {
     list(params?: { cursor?: string; limit?: number }): Promise<MeetingListPage>
     get(clientSessionId: string): Promise<MeetingDetailData>
+    /** Guarda las notas editables del usuario (el scratchpad, Fase 5a). */
+    saveNotes(clientSessionId: string, userNotes: string): Promise<{ ok: boolean }>
     ask(clientSessionId: string, question: string): Promise<{ answer: string }>
+    /** Chat global: pregunta contra el historial, con citas trazables.
+     *  `meetingIds` acota el alcance; sin acotar usa las más recientes.
+     *  `history` = turnos previos del MISMO hilo (para que un follow-up
+     *  como "¿quiénes participaron?" sepa a qué se refiere). */
+    askAll(
+      question: string,
+      meetingIds?: string[],
+      history?: Array<{ question: string; answer: string }>,
+    ): Promise<AskAllResponse>
     /** Activa el link público de solo-lectura y devuelve la URL. */
     share(clientSessionId: string): Promise<{ url: string }>
   }
@@ -104,6 +124,8 @@ export interface UyariBridge {
     dragEnd(): void
     /** El "Pregúntale a Uyari" del nub no responde inline: abre la app. */
     focusMain(): void
+    /** Igual que focusMain, pero navega directo a la pantalla de chat. */
+    openAsk(): void
   }
   events: {
     onCaption(cb: (segment: CaptionSegment) => void): () => void
@@ -113,6 +135,8 @@ export interface UyariBridge {
     onMeetingDetected(cb: (info: { label: string }) => void): () => void
     /** El main decidió expandir/colapsar el nub (hover nativo). */
     onNubExpanded(cb: (expanded: boolean) => void): () => void
+    /** El nub pidió abrir "Pregúntale a Uyari" en la ventana principal. */
+    onOpenAsk(cb: () => void): () => void
   }
 }
 

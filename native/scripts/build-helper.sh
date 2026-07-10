@@ -13,6 +13,14 @@ VENDOR="$NATIVE/vendor/webrtc-audio-processing"
 BUILD="$NATIVE/build"
 mkdir -p "$BUILD" "$NATIVE/bin"
 
+# macOS MÍNIMO del producto: 14.4 (Sonoma) — el Core Audio process tap
+# (AudioHardwareCreateProcessTap) que usa el canal de sistema existe recién
+# ahí. Sin -target explícito, swiftc marca el binario con la versión del
+# host (p.ej. 15.x) y NI SIQUIERA cargaría en un 14.4. Granola cubre <14.4
+# con un fallback de ScreenCaptureKit — para nosotros es backlog, no v1.
+ARCH="$(uname -m)"
+MACOS_MIN="14.4"
+
 if [ ! -f "$VENDOR/dist-universal/lib/libwebrtc-audio-processing-2.a" ]; then
   echo "== Libs del APM ausentes: compilando webrtc-audio-processing (una sola vez) =="
   "$NATIVE/scripts/build-webrtc-apm.sh"
@@ -29,6 +37,7 @@ if [ ! -f "$BUILD/apm_bridge.o" ] \
   # interno del aec3 (echo_canceller3.h) para inyectar config custom — los
   # símbolos ya están compilados en la lib estática.
   clang++ -std=c++17 -O2 -c "$NATIVE/audio-helper/apm_bridge.cpp" \
+    -mmacosx-version-min="$MACOS_MIN" \
     -DNDEBUG -DWEBRTC_APM_DEBUG_DUMP=0 -DWEBRTC_MAC -DWEBRTC_POSIX \
     -I "$VENDOR/dist-arm64/include/webrtc-audio-processing-2" \
     -I "$VENDOR/webrtc" \
@@ -38,6 +47,7 @@ fi
 
 # -import-objc-header expone la API C del bridge a Swift.
 swiftc -O "$NATIVE/audio-helper/main.swift" "$BUILD/apm_bridge.o" \
+  -target "$ARCH-apple-macos$MACOS_MIN" \
   -import-objc-header "$NATIVE/audio-helper/apm_bridge.h" \
   "$VENDOR/dist-universal/lib/libwebrtc-audio-processing-2.a" \
   "$VENDOR"/dist-universal/lib/libabsl_*.a \

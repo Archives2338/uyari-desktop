@@ -9,7 +9,9 @@ import { DeepgramStream, type DeepgramTokenProvider } from './deepgram.stream'
 
 // Frontera única de un canal de STT streaming: AssemblyAiStream y
 // DeepgramStream la implementan igual. El engine habla contra esta interfaz;
-// el proveedor concreto se elige con UYARI_STT (default: assemblyai).
+// el proveedor se elige con UYARI_STT (default: deepgram — menor latencia y
+// sin los cuelgues del tier compartido de AssemblyAI, validado en QA;
+// UYARI_STT=assemblyai = escape hatch).
 
 export interface SttStream extends EventEmitter {
   start(opts?: { take?: number; baseOffsetMs?: number }): Promise<void>
@@ -25,8 +27,8 @@ export interface SttStream extends EventEmitter {
 export type SttProvider = SttTokenProvider & DeepgramTokenProvider
 
 export function createSttStream(api: SttProvider, opts: StreamOptions): SttStream {
-  if (process.env.UYARI_STT === 'deepgram') {
-    return new DeepgramStream(api, opts) as unknown as SttStream
+  if (process.env.UYARI_STT === 'assemblyai') {
+    return new AssemblyAiStream(api, opts) as unknown as SttStream
   }
-  return new AssemblyAiStream(api, opts) as unknown as SttStream
+  return new DeepgramStream(api, opts) as unknown as SttStream
 }

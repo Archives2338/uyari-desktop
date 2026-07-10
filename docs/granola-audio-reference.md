@@ -13,6 +13,11 @@
 
 ## 1. Arquitectura de captura (clase `CombinedAudioCapture`)
 
+> **macOS mínimo: 14.4 (Sonoma).** El process tap
+> (`AudioHardwareCreateProcessTap`) existe recién ahí; el build del helper
+> fija ese target (`build-helper.sh`). Granola cubre <14.4 con un fallback
+> de ScreenCaptureKit — para Uyari es backlog, no v1.
+
 Granola captura mic + sistema con las MISMAS APIs de Core Audio que nosotros
 (confirmado por símbolos importados en el binario):
 - `AudioHardwareCreateProcessTap` + `CATapDescription` → tap del sistema.

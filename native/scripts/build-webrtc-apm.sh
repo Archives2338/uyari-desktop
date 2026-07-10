@@ -21,6 +21,9 @@ REPO_GITLAB="https://gitlab.freedesktop.org/pulseaudio/webrtc-audio-processing.g
 REPO_GITHUB="https://github.com/pulseaudio/webrtc-audio-processing.git"
 
 export PATH="/opt/homebrew/bin:$PATH"
+# Mismo mínimo que el helper (ver build-helper.sh): sin esto las libs quedan
+# marcadas con la versión del host y el link a 14.4 escupe warnings.
+export MACOSX_DEPLOYMENT_TARGET="14.4"
 command -v meson >/dev/null || { echo "meson no encontrado: brew install meson ninja"; exit 1; }
 command -v ninja >/dev/null || { echo "ninja no encontrado: brew install meson ninja"; exit 1; }
 

@@ -229,17 +229,13 @@ final class Downsampler {
 // ============================================================
 
 // Modo de captura del mic:
-//   "auto"  (default) → HÍBRIDO: se decide al arrancar según la salida de
-//           audio — auriculares → auhal (sin eco físico: arranque 200ms,
-//           inmune al bug de arbitraje VP, indicador se apaga en pausa);
-//           parlantes → vp (la AEC de Apple sigue siendo la mejor opción
-//           disponible para cancelar parlantes; nuestro AEC3 propio queda
-//           para cuando cierre la brecha en ese caso).
-//   "auhal" → forzar mic crudo + AEC3 propio.
-//   "vp"    → forzar AVAudioEngine + voice processing de Apple.
-// Se resuelve en el arranque (ver dispatcher); var porque "auto" se
-// reemplaza por el modo elegido.
-var micMode = ProcessInfo.processInfo.environment["UYARI_MIC"] ?? "auto"
+//   "auhal" (default) → mic crudo + AEC3 propio con alineación por
+//           timestamp (el camino Granola, validado en QA: 23.5 dB + gate +
+//           dedup textual; arranque ~200ms, inmune al bug de arbitraje VP,
+//           indicador naranja se apaga en pausa).
+//   "vp"    → AVAudioEngine + voice processing de Apple (escape hatch:
+//           el camino viejo, por si el AEC3 regresiona en un device raro).
+var micMode = ProcessInfo.processInfo.environment["UYARI_MIC"] ?? "auhal"
 
 // El APM se crea en startMicAuhal(), cuando se conocen las rates REALES de
 // ambos streams: el AEC corre a la rate NATIVA de cada dispositivo (48 kHz
@@ -647,8 +643,8 @@ func startMic(useVoiceProcessing: Bool) -> Bool {
 // vía AUHAL — sin voice processing de Apple. Elimina de raíz el bug de
 // arbitraje VP (mic mudo) y el warm-up de ~1s del arranque en frío.
 // La cancelación de eco la hace el AEC3 de WebRTC (ver sección AEC3 arriba)
-// con el tap de sistema como referencia — no la caja negra de Apple. Vive
-// detrás del flag UYARI_MIC=auhal (default: vp) hasta pasar la QA de eco.
+// con el tap de sistema como referencia — no la caja negra de Apple.
+// Es el modo DEFAULT desde que pasó la QA de eco (UYARI_MIC=vp = escape).
 // ============================================================
 
 var auhalUnit: AudioComponentInstance?

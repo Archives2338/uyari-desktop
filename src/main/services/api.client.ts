@@ -137,7 +137,7 @@ export class ApiClient {
    * Sin sesión o sin cuota: silencioso, el error real saldrá al grabar.
    */
   prefetchSttToken(): void {
-    if (process.env.UYARI_STT !== 'deepgram') return
+    if (process.env.UYARI_STT === 'assemblyai') return
     void this.deepgramToken().catch(() => {})
   }
 

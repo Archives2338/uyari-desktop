@@ -34,8 +34,6 @@ const CHANNEL_MIC = 0
 // depender de la física del audio.
 
 const ECHO_TEXT_WINDOW_MS = 30_000
-const ECHO_MIN_TOKENS = 4 // turnos cortos ("ok", "sí, claro") nunca se filtran
-const ECHO_OVERLAP = 0.65
 
 // Palabras función del español/inglés: no cuentan como evidencia de eco
 // (coinciden entre hablantes por azar). Solo las palabras de contenido votan.
@@ -90,11 +88,27 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
           // Referencia para el dedup: TODAS las versiones del turno (los
           // parciales llegan en ~1s, mucho antes de que el eco finalice).
           this.rememberThemText(s.text)
-        } else if (this.looksLikeEcho(s.text)) {
-          console.log(`[echo-dedup] You descartado (eco textual de Them): "${s.text.slice(0, 70)}"`)
+          this.emitSegment(s)
           return
         }
-        this.emitSegment(s)
+        // Filtro a NIVEL DE PALABRAS (QA 8): con video continuo el STT abre
+        // turnos de 30s+ donde conviven el eco y la voz del usuario —
+        // descartar el turno entero se tragaba su voz. Se remueven solo las
+        // rachas que calcan a Them; lo demás (la voz) sobrevive.
+        const filtered = this.filterEchoText(s.text)
+        if (filtered !== s.text) {
+          console.log(
+            `[echo-dedup] You filtrado: "${s.text.slice(0, 60)}" → "${filtered.slice(0, 60) || '∅'}"`,
+          )
+        }
+        if (filtered !== '') {
+          this.emittedYou.add(s.providerMessageId)
+          this.emitSegment({ ...s, text: filtered })
+        } else if (this.emittedYou.has(s.providerMessageId)) {
+          // Una versión temprana de este turno ya se pintó y ahora quedó
+          // vacío: RETRACTAR (texto vacío = remover, ver upsertCaption).
+          this.emitSegment({ ...s, text: '' })
+        }
       })
       stream.on('status', (status: CaptureStatus, detail?: string) => {
         this.statusByChannel.set(channel, status)
@@ -105,6 +119,9 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
 
   // Textos recientes del canal sistema (tokens de contenido + timestamp).
   private themRecent: Array<{ tokens: Set<string>; at: number }> = []
+  // Turnos de You cuya versión ya se emitió (para poder retractarlos si una
+  // versión posterior queda vacía tras el filtro).
+  private emittedYou = new Set<string>()
 
   private rememberThemText(text: string): void {
     const tokens = new Set(contentTokens(text))
@@ -117,14 +134,14 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
   }
 
   /**
-   * ¿Este texto de "You" es eco de lo que sonó por el sistema? Verdadero si
-   * la mayoría de sus palabras de contenido aparecen en lo que "Them" dijo
-   * en la ventana reciente. Turnos cortos nunca se filtran (sin evidencia
-   * suficiente, gana el usuario).
+   * Remueve del texto las RACHAS de palabras que calcan lo que "Them" dijo
+   * en la ventana reciente (eco), conservando el resto (la voz del usuario).
+   * Una racha = tramo contiguo sin palabras de contenido no-coincidentes,
+   * con ≥3 coincidencias de contenido (3+ calcos seguidos no son azar; las
+   * stopwords intermedias acompañan a la racha). Devuelve '' si no queda
+   * contenido real — el turno era eco puro.
    */
-  private looksLikeEcho(text: string): boolean {
-    const words = contentTokens(text)
-    if (words.length < ECHO_MIN_TOKENS) return false
+  private filterEchoText(text: string): string {
     const now = Date.now()
     const seen = new Set<string>()
     for (const entry of this.themRecent) {
@@ -132,14 +149,50 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
         for (const w of entry.tokens) seen.add(w)
       }
     }
-    if (seen.size === 0) return false
-    const hits = words.reduce((n, w) => (seen.has(w) ? n + 1 : n), 0)
-    const ratio = hits / words.length
-    // Regla principal: mayormente eco. Regla secundaria (turnos MIXTOS, QA 7:
-    // "mi frase" + eco pegado en el mismo turno diluía el ratio a ~0.6): una
-    // coincidencia ABSOLUTA alta con ratio moderado también es eco — que 8+
-    // palabras de contenido calquen lo del sistema no pasa por azar.
-    return ratio >= ECHO_OVERLAP || (ratio >= 0.5 && hits >= 8)
+    if (seen.size === 0) return text
+
+    const raw = text.split(/\s+/).filter(Boolean)
+    const norm = (t: string): string =>
+      t
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[̀-ͯ]/g, '')
+        .replace(/[^a-z0-9ñ]/g, '')
+    const info = raw.map((token) => {
+      const n = norm(token)
+      const content = n.length > 1 && !STOPWORDS.has(n)
+      return { content, match: content && seen.has(n) }
+    })
+
+    const remove = new Array<boolean>(raw.length).fill(false)
+    let i = 0
+    while (i < raw.length) {
+      if (info[i].content && !info[i].match) {
+        i += 1
+        continue
+      }
+      // Tramo contiguo de coincidencias + stopwords (sin contenido ajeno).
+      let j = i
+      let matches = 0
+      while (j < raw.length && !(info[j].content && !info[j].match)) {
+        if (info[j].match) matches += 1
+        j += 1
+      }
+      if (matches >= 3) {
+        for (let k = i; k < j; k++) remove[k] = true
+      }
+      i = j
+    }
+
+    const kept = raw.filter((_, k) => !remove[k]).join(' ').trim()
+    const removedAny = remove.some(Boolean)
+    const keptContent = contentTokens(kept).length
+    // Restos de un turno mayormente removido (≤2 palabras de contenido tras
+    // quitar una racha) = migajas del eco que el STT transcribió con
+    // variantes ("reserva" por "reservado"): eco puro. Sin remoción, textos
+    // cortos pasan intactos ("ok", "sí claro").
+    if (keptContent === 0 || (removedAny && keptContent <= 2)) return ''
+    return kept
   }
 
   /**

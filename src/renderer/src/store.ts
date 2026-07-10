@@ -69,7 +69,12 @@ export const useApp = create<AppStore>((set, get) => ({
   pushCaption: (segment) =>
     set((s) => {
       // Dedupe por providerMessageId: una versión más nueva pisa la anterior.
+      // Texto vacío = retracción (dedup de eco): se remueve de la vista.
       const idx = s.captions.findIndex((c) => c.providerMessageId === segment.providerMessageId)
+      if (segment.text === '') {
+        if (idx < 0) return {}
+        return { captions: [...s.captions.slice(0, idx), ...s.captions.slice(idx + 1)] }
+      }
       if (idx >= 0) {
         const next = s.captions.slice()
         next[idx] = segment

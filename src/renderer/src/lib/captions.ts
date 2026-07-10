@@ -34,9 +34,16 @@ export function groupCaptions(captions: CaptionSegment[]): CaptionGroup[] {
   return groups
 }
 
-/** Dedupe por providerMessageId: la versión más nueva pisa a la anterior. */
+/**
+ * Dedupe por providerMessageId: la versión más nueva pisa a la anterior.
+ * Texto VACÍO = retracción (el dedup de eco descartó un turno cuya versión
+ * temprana ya se había pintado): se remueve de la lista.
+ */
 export function upsertCaption(list: CaptionSegment[], segment: CaptionSegment): CaptionSegment[] {
   const idx = list.findIndex((c) => c.providerMessageId === segment.providerMessageId)
+  if (segment.text === '') {
+    return idx >= 0 ? [...list.slice(0, idx), ...list.slice(idx + 1)] : list
+  }
   if (idx >= 0) {
     const next = list.slice()
     next[idx] = segment

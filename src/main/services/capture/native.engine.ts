@@ -24,6 +24,42 @@ const PCM_BYTES = 1600 // 800 samples * 2 = 50 ms
 const FRAME_BYTES = 1 + PCM_BYTES
 const CHANNEL_MIC = 0
 
+// --- Dedup textual de eco (la red final, determinística) ---
+// El AEC + gate eliminan la mayoría del eco acústico, pero a volumen alto
+// de parlantes pueden fugarse ráfagas que el STT transcribe. El eco tiene
+// una firma inconfundible A NIVEL DE TEXTO: produce las MISMAS palabras que
+// el canal del sistema. Si un turno de "You" es mayormente un subconjunto
+// de lo que "Them" dijo en la ventana reciente, es eco → se descarta antes
+// de emitir. Ataca el síntoma exactamente donde importa (el transcript) sin
+// depender de la física del audio.
+
+const ECHO_TEXT_WINDOW_MS = 30_000
+const ECHO_MIN_TOKENS = 4 // turnos cortos ("ok", "sí, claro") nunca se filtran
+const ECHO_OVERLAP = 0.65
+
+// Palabras función del español/inglés: no cuentan como evidencia de eco
+// (coinciden entre hablantes por azar). Solo las palabras de contenido votan.
+const STOPWORDS = new Set(
+  ('de la que el en y a los se del las un por con no una su para es al lo como ' +
+    'mas pero sus le ya o este si porque esta entre cuando muy sin sobre tambien ' +
+    'me hasta hay donde quien desde todo nos durante todos uno les ni contra ' +
+    'otros ese eso ante ellos e esto mi antes algunos que unos yo otro otras otra ' +
+    'el tanto esa estos mucho quienes nada muchos cual poco ella estar estas ' +
+    'algunas algo nosotros the a an and or but if of to in on for with at by ' +
+    'is are was were be been it this that these those i you he she we they').split(' '),
+)
+
+/** Tokens de contenido normalizados (minúsculas, sin tildes ni puntuación). */
+function contentTokens(text: string): string[] {
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9ñ\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 1 && !STOPWORDS.has(w))
+}
+
 export class NativeCaptureEngine extends BaseCaptureEngine {
   private readonly you: AssemblyAiStream
   private readonly them: AssemblyAiStream
@@ -49,12 +85,56 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
       ['you', this.you],
       ['them', this.them],
     ] as const) {
-      stream.on('segment', (s: CaptionSegment) => this.emitSegment(s))
+      stream.on('segment', (s: CaptionSegment) => {
+        if (channel === 'them') {
+          // Referencia para el dedup: TODAS las versiones del turno (los
+          // parciales llegan en ~1s, mucho antes de que el eco finalice).
+          this.rememberThemText(s.text)
+        } else if (this.looksLikeEcho(s.text)) {
+          console.log(`[echo-dedup] You descartado (eco textual de Them): "${s.text.slice(0, 70)}"`)
+          return
+        }
+        this.emitSegment(s)
+      })
       stream.on('status', (status: CaptureStatus, detail?: string) => {
         this.statusByChannel.set(channel, status)
         this.emitAggregateStatus(detail)
       })
     }
+  }
+
+  // Textos recientes del canal sistema (tokens de contenido + timestamp).
+  private themRecent: Array<{ tokens: Set<string>; at: number }> = []
+
+  private rememberThemText(text: string): void {
+    const tokens = new Set(contentTokens(text))
+    if (tokens.size === 0) return
+    const now = Date.now()
+    this.themRecent.push({ tokens, at: now })
+    while (this.themRecent.length > 0 && now - this.themRecent[0].at > ECHO_TEXT_WINDOW_MS) {
+      this.themRecent.shift()
+    }
+  }
+
+  /**
+   * ¿Este texto de "You" es eco de lo que sonó por el sistema? Verdadero si
+   * la mayoría de sus palabras de contenido aparecen en lo que "Them" dijo
+   * en la ventana reciente. Turnos cortos nunca se filtran (sin evidencia
+   * suficiente, gana el usuario).
+   */
+  private looksLikeEcho(text: string): boolean {
+    const words = contentTokens(text)
+    if (words.length < ECHO_MIN_TOKENS) return false
+    const now = Date.now()
+    const seen = new Set<string>()
+    for (const entry of this.themRecent) {
+      if (now - entry.at <= ECHO_TEXT_WINDOW_MS) {
+        for (const w of entry.tokens) seen.add(w)
+      }
+    }
+    if (seen.size === 0) return false
+    const hits = words.reduce((n, w) => (seen.has(w) ? n + 1 : n), 0)
+    return hits / words.length >= ECHO_OVERLAP
   }
 
   /**

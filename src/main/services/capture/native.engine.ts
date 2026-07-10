@@ -1,6 +1,5 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process'
 import type { Readable, Writable } from 'node:stream'
-import { helperPath } from './helper-path'
 import { BaseCaptureEngine, type CaptureStartOptions } from './engine'
 import { STREAM_SAMPLE_RATE } from './assemblyai.stream'
 import { createSttStream, type SttStream, type SttProvider } from './stt-stream'
@@ -76,6 +75,10 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
   constructor(
     api: SttProvider,
     private readonly mic: MicControlPort,
+    // Ruta absoluta del binario del helper. Se INYECTA (no se resuelve con
+    // helperPath()) porque este engine puede correr dentro de un utilityProcess
+    // donde el módulo `app` de electron no existe (ver worker.engine.ts).
+    private readonly helperBin: string,
   ) {
     super()
     this.you = createSttStream(api, { speaker: 'You', channel: 'you' })
@@ -248,7 +251,7 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
   }
 
   private spawnHelper(): void {
-    const bin = helperPath()
+    const bin = this.helperBin
     let helper: ChildProcessByStdio<Writable, Readable, Readable>
     try {
       helper = spawn(bin, [], { stdio: ['pipe', 'pipe', 'pipe'] })

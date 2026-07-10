@@ -1,5 +1,7 @@
 import { app, BrowserWindow } from 'electron'
+import { join } from 'node:path'
 import { IPC } from '@shared/ipc'
+import { helperPath } from './services/capture/helper-path'
 import { createMainWindow } from './windows/main-window'
 import {
   createOverlayWindow,
@@ -45,8 +47,12 @@ if (!app.requestSingleInstanceLock()) {
       stop: () => broadcast(IPC.evMicControl, { action: 'stop' }),
     }
     const store = new TranscriptStore()
+    // Rutas resueltas aquí (el main tiene `app`; el utilityProcess de audio no).
+    // El bundle del worker queda junto a index.js en out/main/.
+    const helperBin = helperPath()
+    const audioWorkerPath = join(import.meta.dirname, 'audio-worker.js')
     const meetings = new MeetingService(api, store, () =>
-      createCaptureEngine({ api, mic: micControl }),
+      createCaptureEngine({ api, mic: micControl, helperBin, workerPath: audioWorkerPath }),
     )
 
     // Overlay nub: existe solo mientras hay sesión activa.

@@ -3,6 +3,7 @@ import { useApp } from '@renderer/store'
 import { Button } from '@renderer/ui/Button'
 import { dIcon } from '@renderer/ui/chrome'
 import { Sidebar } from '@renderer/components/Sidebar'
+import { NotesEditor } from '@renderer/components/NotesEditor'
 import { loadFlow } from '@renderer/onboarding/state'
 import { groupCaptions } from '@renderer/lib/captions'
 import { PLATFORM_LABEL } from '@renderer/strings'
@@ -37,9 +38,10 @@ export function MeetingDetail({ clientSessionId }: { clientSessionId: string }):
   const [question, setQuestion] = useState('')
   const [qa, setQa] = useState<QaEntry[]>([])
 
-  // Notas editables del usuario (Fase 5a — el scratchpad estilo Granola).
-  // Autosave debounced; conviven con el resumen IA (nunca lo pisan).
-  const [notes, setNotes] = useState('')
+  // Notas editables del usuario (Fase 5a persistencia + 5b editor rico TipTap).
+  // Autosave debounced; conviven con el resumen IA (nunca lo pisan). El editor
+  // es no-controlado (se inicializa de meeting.userNotes), así que no hace falta
+  // un estado `notes` — solo los refs para el autosave y el flush.
   const [notesStatus, setNotesStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
   const notesInit = useRef(false) // solo inicializar del server UNA vez
   const notesLatest = useRef('') // último valor tipeado (flush en unmount)
@@ -85,7 +87,6 @@ export function MeetingDetail({ clientSessionId }: { clientSessionId: string }):
     if (meeting && !notesInit.current) {
       const initial = meeting.userNotes ?? ''
       notesInit.current = true
-      setNotes(initial)
       notesLatest.current = initial
       notesSaved.current = initial
     }
@@ -111,7 +112,6 @@ export function MeetingDetail({ clientSessionId }: { clientSessionId: string }):
   )
 
   const onNotesChange = (value: string): void => {
-    setNotes(value)
     notesLatest.current = value
     if (notesTimer.current) clearTimeout(notesTimer.current)
     notesTimer.current = setTimeout(() => void persistNotes(value), 800)
@@ -226,11 +226,9 @@ export function MeetingDetail({ clientSessionId }: { clientSessionId: string }):
                     {notesStatus === 'saving' ? 'Saving…' : notesStatus === 'saved' ? 'Saved' : ''}
                   </span>
                 </div>
-                <textarea
-                  className="detail-notes-area"
-                  placeholder="Jot down your own notes… they stay private to you, alongside the AI summary."
-                  value={notes}
-                  onChange={(e) => onNotesChange(e.target.value)}
+                <NotesEditor
+                  initialContent={meeting.userNotes ?? ''}
+                  onChange={onNotesChange}
                   onBlur={() => {
                     if (notesTimer.current) clearTimeout(notesTimer.current)
                     void persistNotes(notesLatest.current)

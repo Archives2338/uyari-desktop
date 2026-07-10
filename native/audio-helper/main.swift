@@ -605,11 +605,12 @@ let auhalInputProc: AURenderCallback = { _, ioActionFlags, inTimeStamp, inBusNum
                         let a = Int32(s.magnitude)
                         if a > framePeak { framePeak = a }
                     }
-                    // Eco puro medido: el AEC deja pasar <25% del pico crudo.
-                    // Voz del usuario: el AEC la preserva (ratio ≈ 1). Umbral
-                    // 45% + tope absoluto (nunca silenciar salida claramente
-                    // fuerte, por si el crudo decae raro entre callbacks).
-                    if framePeak < rawPeak * 45 / 100 && framePeak < 6000 {
+                    // Umbral CONSERVADOR (15%): solo silencia frames donde
+                    // el AEC removió >85% (eco inequívoco). La voz del usuario
+                    // en double-talk (ratio típico 0.3-0.6) pasa SIEMPRE — la
+                    // 6ª QA mostró que el 45% la silenciaba. El eco que pase
+                    // lo caza el dedup textual (native.engine.ts).
+                    if framePeak < rawPeak * 15 / 100 && framePeak < 3000 {
                         for i in 0..<frame.count { frame[i] = 0 }
                     }
                 }

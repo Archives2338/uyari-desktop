@@ -43,20 +43,16 @@ webrtc::EchoCanceller3Config aggressiveEc3Config() {
   // habla (1-4 kHz). Tunear solo lf no mueve la aguja (medido).
   // normal (el usuario no domina): agresivo — sin costo para su voz.
   s.normal_tuning.mask_lf =
-      webrtc::EchoCanceller3Config::Suppressor::MaskingThresholds(.001f, .002f, .001f);
+      webrtc::EchoCanceller3Config::Suppressor::MaskingThresholds(.2f, .3f, .3f);
   s.normal_tuning.mask_hf =
-      webrtc::EchoCanceller3Config::Suppressor::MaskingThresholds(.001f, .002f, .001f);
+      webrtc::EchoCanceller3Config::Suppressor::MaskingThresholds(.05f, .08f, .3f);
   // nearend (double-talk): protector pero NO transparente como el default
   // (lf 1.09 = por ahí se fugaba el eco durante el habla del usuario).
-  s.nearend_tuning.mask_lf =
-      webrtc::EchoCanceller3Config::Suppressor::MaskingThresholds(.002f, .004f, .002f);
-  s.nearend_tuning.mask_hf =
-      webrtc::EchoCanceller3Config::Suppressor::MaskingThresholds(.002f, .004f, .002f);
-  // Semántica REAL (dominant_nearend_detector.cc): entra al modo near-end
-  // cuando echo < enr_threshold × nearend — BAJARLO lo hace más difícil.
-  s.dominant_nearend_detection.enr_threshold = .1f;    // default .25
-  s.dominant_nearend_detection.trigger_threshold = 15; // default 12
-  s.dominant_nearend_detection.hold_duration = 25;     // default 50
+  // nearend_tuning y dominant_nearend_detection quedan en STOCK: el modo
+  // near-end dominante existe justamente para proteger la voz del usuario en
+  // double-talk. La 6ª QA demostró que endurecerlo lo silencia ("solo se ve
+  // cuando se pausa el audio"). El eco que se fugue por esta transparencia
+  // lo caza el dedup TEXTUAL (native.engine.ts) — determinístico.
   return cfg;
 }
 

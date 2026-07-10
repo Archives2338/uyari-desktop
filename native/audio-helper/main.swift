@@ -251,7 +251,6 @@ var micMode = ProcessInfo.processInfo.environment["UYARI_MIC"] ?? "auto"
 // no hay plegado y el AEC ve el espectro completo.
 var apmHandle: OpaquePointer? = nil
 var apmCaptureRate = 0
-var apmRenderFrame = 0 // samples por frame de render (480 a 48 kHz)
 // Diagnóstico: el primer error de cada lado del APM se loguea una vez (un
 // error persistente = ese stream NO se está procesando).
 var apmRenderErrLogged = false
@@ -828,7 +827,6 @@ func startMicAuhal() -> Bool {
         }
         if Int(rate) == Int(systemRate), let apm = apm_create(Int32(systemRate), Int32(rate)) {
             apmHandle = apm
-            apmRenderFrame = Int(apm_render_frame_samples(apm))
             apmCaptureRate = Int(rate)
             let aligner = AecAligner(rate: rate, frame: Int(apm_capture_frame_samples(apm)))
             aligner.onCleanMic = { clean in
@@ -844,7 +842,6 @@ func startMicAuhal() -> Bool {
             aligner.start()
             log("AEC3: APM + alineador por timestamp (render/capture \(Int(rate)) Hz)")
         } else {
-            apmRenderFrame = 0
             apmCaptureRate = 0
             log("AEC3: sin APM (rate \(Int(systemRate))/\(Int(rate)) no soportada o distinta) — mic CRUDO")
         }

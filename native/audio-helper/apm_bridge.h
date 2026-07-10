@@ -40,8 +40,7 @@ typedef struct ApmHandle ApmHandle;
 // (soportadas: 8/16/32/48 kHz).
 ApmHandle* apm_create(int render_rate_hz, int capture_rate_hz);
 
-// Samples por frame de 10 ms de cada stream (480 a 48 kHz, 160 a 16 kHz).
-int apm_render_frame_samples(const ApmHandle* h);
+// Samples por frame de 10 ms del capture (480 a 48 kHz, 160 a 16 kHz).
 int apm_capture_frame_samples(const ApmHandle* h);
 
 // Far-end: un frame de 10 ms del audio del sistema (mono int16).

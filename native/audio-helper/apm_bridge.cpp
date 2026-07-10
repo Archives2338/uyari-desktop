@@ -84,10 +84,6 @@ ApmHandle* apm_create(int render_rate_hz, int capture_rate_hz) {
   return h;
 }
 
-int apm_render_frame_samples(const ApmHandle* h) {
-  return static_cast<int>(h->renderConfig.num_frames());
-}
-
 int apm_capture_frame_samples(const ApmHandle* h) {
   return static_cast<int>(h->captureConfig.num_frames());
 }

@@ -4,8 +4,75 @@
 #include "apm_bridge.h"
 
 #include <atomic>
+#include <cstdio>
+#include <cstdlib>
+#include <memory>
+#include <optional>
+#include <string_view>
 
 #include <modules/audio_processing/include/audio_processing.h>
+// Header interno del aec3 (no se instala, se incluye del árbol fuente; los
+// símbolos SÍ están en la lib estática): lo necesitamos para inyectar un
+// EchoCanceller3Config propio — el default del APM es demasiado conservador
+// para transcripción (deja pasar residuo que el STT transcribe, sobre todo
+// en double-talk). Granola hace exactamente esto: construye su
+// EchoCanceller3Config explícito (confirmado en su binario).
+#include <modules/audio_processing/aec3/echo_canceller3.h>
+
+namespace {
+
+// Tuning agresivo para TRANSCRIPCIÓN (no para llamada full-duplex): el costo
+// de dejar pasar eco (el STT transcribe la voz remota en el canal del
+// usuario) es mayor que el de sobre-suprimir un poco en double-talk.
+// Partimos de los defaults y endurecemos tres cosas:
+//  - normal_tuning: suprimir con ratios de eco más chicos (masks más bajas).
+//  - nearend_tuning: el modo "near-end dominante" del default es casi
+//    transparente (enr_transparent=1.09) — es POR donde se fugaba el eco en
+//    double-talk. Se baja a un punto protector pero no transparente.
+//  - dominant_nearend_detection: más difícil ENTRAR y quedarse en ese modo.
+webrtc::EchoCanceller3Config aggressiveEc3Config() {
+  webrtc::EchoCanceller3Config cfg; // defaults de fábrica
+  // El supresor subestima el eco residual con parlantes no lineales (los
+  // armónicos de la distorsión no entran al modelo lineal → ENR chico →
+  // masks transparentes; medido: bajar masks "razonables" no muerde, solo
+  // valores casi-cero). ep_strength.default_gain infla la estimación del
+  // camino del eco — el supresor ve el eco a su tamaño real.
+  auto& s = cfg.suppressor;
+  // Geometría de bandas (suppression_gain.cc): mask_lf gobierna <~750 Hz;
+  // mask_hf gobierna el resto — INCLUIDA la zona de inteligibilidad del
+  // habla (1-4 kHz). Tunear solo lf no mueve la aguja (medido).
+  // normal (el usuario no domina): agresivo — sin costo para su voz.
+  s.normal_tuning.mask_lf =
+      webrtc::EchoCanceller3Config::Suppressor::MaskingThresholds(.001f, .004f, .3f);
+  s.normal_tuning.mask_hf =
+      webrtc::EchoCanceller3Config::Suppressor::MaskingThresholds(.001f, .004f, .3f);
+  // nearend (double-talk): protector pero NO transparente como el default
+  // (lf 1.09 = por ahí se fugaba el eco durante el habla del usuario).
+  s.nearend_tuning.mask_lf =
+      webrtc::EchoCanceller3Config::Suppressor::MaskingThresholds(.002f, .008f, .3f);
+  s.nearend_tuning.mask_hf =
+      webrtc::EchoCanceller3Config::Suppressor::MaskingThresholds(.002f, .008f, .3f);
+  // Semántica REAL (dominant_nearend_detector.cc): entra al modo near-end
+  // cuando echo < enr_threshold × nearend — BAJARLO lo hace más difícil.
+  s.dominant_nearend_detection.enr_threshold = .1f;    // default .25
+  s.dominant_nearend_detection.trigger_threshold = 15; // default 12
+  s.dominant_nearend_detection.hold_duration = 25;     // default 50
+  return cfg;
+}
+
+class TunedEc3Factory : public webrtc::EchoControlFactory {
+ public:
+  std::unique_ptr<webrtc::EchoControl> Create(int sample_rate_hz,
+                                              int num_render_channels,
+                                              int num_capture_channels) override {
+    return std::make_unique<webrtc::EchoCanceller3>(
+        aggressiveEc3Config(), std::nullopt, sample_rate_hz,
+        static_cast<size_t>(num_render_channels),
+        static_cast<size_t>(num_capture_channels));
+  }
+};
+
+} // namespace
 
 struct ApmHandle {
   rtc::scoped_refptr<webrtc::AudioProcessing> apm;
@@ -30,7 +97,14 @@ ApmHandle* apm_create(int render_rate_hz, int capture_rate_hz) {
     return nullptr;
   }
 
-  auto apm = webrtc::AudioProcessingBuilder().Create();
+  webrtc::AudioProcessingBuilder builder;
+  // UYARI_AEC_TUNING=default deja el EC3 de fábrica (para A/B); si no, se
+  // inyecta el tuning agresivo de transcripción.
+  const char* tuning = std::getenv("UYARI_AEC_TUNING");
+  if (!(tuning && std::string_view(tuning) == "default")) {
+    builder.SetEchoControlFactory(std::make_unique<TunedEc3Factory>());
+  }
+  auto apm = builder.Create();
   if (!apm) return nullptr;
 
   webrtc::AudioProcessing::Config config;
@@ -42,6 +116,12 @@ ApmHandle* apm_create(int render_rate_hz, int capture_rate_hz) {
   config.high_pass_filter.enabled = true;
   config.gain_controller1.enabled = false;
   config.gain_controller2.enabled = false;
+  // NS encima del AEC: el residuo que sobrevive al filtro lineal viene en
+  // gran parte de la NO-linealidad del parlante (armónicos que el AEC no
+  // puede modelar) — el supresor de ruido lo trata como ruido y lo limpia.
+  // Granola no lo usa (tunean su EC3Config, valores ilegibles); para
+  // transcripción el trade-off (voz levemente procesada vs eco transcrito)
+  // favorece NS. Desactivable junto al tuning con UYARI_AEC_TUNING=default.
   config.noise_suppression.enabled = false;
   apm->ApplyConfig(config);
 

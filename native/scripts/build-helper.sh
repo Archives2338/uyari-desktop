@@ -25,8 +25,13 @@ if [ ! -f "$BUILD/apm_bridge.o" ] \
    || [ "$NATIVE/audio-helper/apm_bridge.cpp" -nt "$BUILD/apm_bridge.o" ] \
    || [ "$NATIVE/audio-helper/apm_bridge.h" -nt "$BUILD/apm_bridge.o" ]; then
   echo "== Compilando apm_bridge.cpp =="
+  # El include del árbol FUENTE (además del instalado) da acceso al header
+  # interno del aec3 (echo_canceller3.h) para inyectar config custom — los
+  # símbolos ya están compilados en la lib estática.
   clang++ -std=c++17 -O2 -c "$NATIVE/audio-helper/apm_bridge.cpp" \
+    -DNDEBUG -DWEBRTC_APM_DEBUG_DUMP=0 -DWEBRTC_MAC -DWEBRTC_POSIX \
     -I "$VENDOR/dist-arm64/include/webrtc-audio-processing-2" \
+    -I "$VENDOR/webrtc" \
     -I "${ABSL_INC[0]}" \
     -o "$BUILD/apm_bridge.o"
 fi

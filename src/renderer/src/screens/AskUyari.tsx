@@ -363,9 +363,29 @@ function ChatHome({
   )
 }
 
+/** Burbuja de pregunta + flame/puntos latiendo — se pinta al toque
+ *  (optimista), antes de que la respuesta llegue. Sin esto un click se
+ *  siente muerto: nada cambiaba hasta que el turno completo aparecía. */
+function ThinkingBlock({ question }: { question?: string }): React.JSX.Element {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {question !== undefined && <div className="ask-question-bubble">{question}</div>}
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <img src={flameIcon} alt="" className="ask-flame-thinking" style={{ height: 26, flexShrink: 0 }} />
+        <span className="ask-thinking-dots">
+          <span />
+          <span />
+          <span />
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function TurnBlock({
   turn,
   isLast,
+  isRegenerating,
   loading,
   checked,
   onToggleCheck,
@@ -379,6 +399,7 @@ function TurnBlock({
 }: {
   turn: AskTurn
   isLast: boolean
+  isRegenerating: boolean
   loading: boolean
   checked: Set<string>
   onToggleCheck: (key: string) => void
@@ -390,6 +411,7 @@ function TurnBlock({
   followUpNotice: boolean
   onAskFollowUp: (text: string) => void
 }): React.JSX.Element {
+  if (isRegenerating) return <ThinkingBlock question={turn.question} />
   const allActionItems = turn.citations.flatMap((c, ci) =>
     c.actionItems.map((item, ii) => ({ key: `${turn.id}:${ci}:${ii}`, item })),
   )
@@ -484,6 +506,8 @@ function TurnBlock({
 
 function ConversationView({
   thread,
+  pendingQuestion,
+  regeneratingTurnId,
   loading,
   checked,
   onToggleCheck,
@@ -501,7 +525,11 @@ function ConversationView({
   meetings,
   onSubmit,
 }: {
-  thread: AskThread
+  /** null = todavía no hay hilo persistido (primera pregunta en vuelo). */
+  thread: AskThread | null
+  /** Pregunta nueva en vuelo para ESTE hilo (o para uno por crear). */
+  pendingQuestion: string | null
+  regeneratingTurnId: string | null
   loading: boolean
   checked: Set<string>
   onToggleCheck: (key: string) => void
@@ -519,7 +547,8 @@ function ConversationView({
   meetings: MeetingListItem[]
   onSubmit: () => void
 }): React.JSX.Element {
-  const lastTurn = thread.turns[thread.turns.length - 1]
+  const turns = thread?.turns ?? []
+  const lastTurn = turns[turns.length - 1]
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
       <div
@@ -535,11 +564,12 @@ function ConversationView({
           boxSizing: 'border-box',
         }}
       >
-        {thread.turns.map((turn) => (
+        {turns.map((turn) => (
           <TurnBlock
             key={turn.id}
             turn={turn}
             isLast={turn.id === lastTurn.id}
+            isRegenerating={regeneratingTurnId === turn.id}
             loading={loading}
             checked={checked}
             onToggleCheck={onToggleCheck}
@@ -552,6 +582,7 @@ function ConversationView({
             onAskFollowUp={onAskFollowUp}
           />
         ))}
+        {pendingQuestion !== null && <ThinkingBlock question={pendingQuestion} />}
       </div>
 
       <div style={{ maxWidth: 620, width: '100%', margin: '0 auto', padding: '10px 0 20px', boxSizing: 'border-box' }}>
@@ -563,7 +594,7 @@ function ConversationView({
           scope={scope}
           onScopeChange={onScopeChange}
           meetings={meetings}
-          citedCount={lastTurn.citations.length}
+          citedCount={lastTurn?.citations.length ?? 0}
           disabled={loading}
         />
       </div>
@@ -589,6 +620,12 @@ export function AskUyari(): React.JSX.Element {
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const [copiedTurnId, setCopiedTurnId] = useState<string | null>(null)
   const [followUpNoticeTurnId, setFollowUpNoticeTurnId] = useState<string | null>(null)
+  // Estado optimista: la pregunta aparece al toque, el flame late hasta
+  // que la respuesta real llega (ver ThinkingBlock). Sin esto un click en
+  // un follow-up se siente "muerto" — nada cambia hasta que todo el turno
+  // aparece de golpe.
+  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null)
+  const [regeneratingTurnId, setRegeneratingTurnId] = useState<string | null>(null)
 
   useEffect(() => {
     // Alimenta el selector de alcance con reuniones reales (título, id).
@@ -626,6 +663,8 @@ export function AskUyari(): React.JSX.Element {
     if (!q || loading) return
     setLoading(true)
     setError('')
+    setPendingQuestion(q) // optimista: se pinta antes de que llegue la respuesta
+    setInput('')
     try {
       const priorTurns = active?.turns.slice(-6).map((t) => ({ question: t.question, answer: t.answer }))
       const result = await window.uyari.meetings.askAll(q, resolveMeetingIds(), priorTurns)
@@ -644,11 +683,11 @@ export function AskUyari(): React.JSX.Element {
         setThreads(next)
         setActiveThreadId(next[0].id)
       }
-      setInput('')
     } catch {
       setError(S.ask.error)
     } finally {
       setLoading(false)
+      setPendingQuestion(null)
     }
   }
 
@@ -660,6 +699,7 @@ export function AskUyari(): React.JSX.Element {
     if (idx < 0) return
     setLoading(true)
     setError('')
+    setRegeneratingTurnId(turn.id)
     try {
       const priorTurns = active.turns
         .slice(0, idx)
@@ -677,6 +717,7 @@ export function AskUyari(): React.JSX.Element {
       setError(S.ask.error)
     } finally {
       setLoading(false)
+      setRegeneratingTurnId(null)
     }
   }
 
@@ -722,9 +763,11 @@ export function AskUyari(): React.JSX.Element {
         }
       />
       <main style={{ flex: 1, overflowY: 'auto', padding: '0 40px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
-        {active ? (
+        {active || pendingQuestion ? (
           <ConversationView
             thread={active}
+            pendingQuestion={pendingQuestion}
+            regeneratingTurnId={regeneratingTurnId}
             loading={loading}
             checked={checked}
             onToggleCheck={toggleChecked}

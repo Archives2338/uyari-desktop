@@ -967,6 +967,59 @@ body {
   color: var(--accent-strong);
 }
 
+/* Estado "pensando": la pregunta aparece al toque (optimista) y el
+   flame + puntos laten mientras se espera la respuesta — sin esto el
+   click se siente muerto (nada cambia hasta que el turno completo llega). */
+.ask-flame-thinking {
+  animation: ask-flame-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes ask-flame-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.ask-thinking-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+}
+
+.ask-thinking-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-4);
+  animation: ask-thinking-bounce 1.2s ease-in-out infinite;
+}
+
+.ask-thinking-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.ask-thinking-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes ask-thinking-bounce {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 /* Pregunta del usuario: tostado/sidebar-tone, nunca violeta — el usuario
    es neutro (regla del handoff). */
 .ask-question-bubble {

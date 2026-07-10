@@ -19,56 +19,13 @@
 // EchoCanceller3Config explícito (confirmado en su binario).
 #include <modules/audio_processing/aec3/echo_canceller3.h>
 
-namespace {
-
-// Tuning agresivo para TRANSCRIPCIÓN (no para llamada full-duplex): el costo
-// de dejar pasar eco (el STT transcribe la voz remota en el canal del
-// usuario) es mayor que el de sobre-suprimir un poco en double-talk.
-// Partimos de los defaults y endurecemos tres cosas:
-//  - normal_tuning: suprimir con ratios de eco más chicos (masks más bajas).
-//  - nearend_tuning: el modo "near-end dominante" del default es casi
-//    transparente (enr_transparent=1.09) — es POR donde se fugaba el eco en
-//    double-talk. Se baja a un punto protector pero no transparente.
-//  - dominant_nearend_detection: más difícil ENTRAR y quedarse en ese modo.
-webrtc::EchoCanceller3Config aggressiveEc3Config() {
-  webrtc::EchoCanceller3Config cfg; // defaults de fábrica
-  // El supresor subestima el eco residual con parlantes no lineales (los
-  // armónicos de la distorsión no entran al modelo lineal → ENR chico →
-  // masks transparentes; medido: bajar masks "razonables" no muerde, solo
-  // valores casi-cero). ep_strength.default_gain infla la estimación del
-  // camino del eco — el supresor ve el eco a su tamaño real.
-  auto& s = cfg.suppressor;
-  // Geometría de bandas (suppression_gain.cc): mask_lf gobierna <~750 Hz;
-  // mask_hf gobierna el resto — INCLUIDA la zona de inteligibilidad del
-  // habla (1-4 kHz). Tunear solo lf no mueve la aguja (medido).
-  // normal (el usuario no domina): agresivo — sin costo para su voz.
-  s.normal_tuning.mask_lf =
-      webrtc::EchoCanceller3Config::Suppressor::MaskingThresholds(.2f, .3f, .3f);
-  s.normal_tuning.mask_hf =
-      webrtc::EchoCanceller3Config::Suppressor::MaskingThresholds(.05f, .08f, .3f);
-  // nearend (double-talk): protector pero NO transparente como el default
-  // (lf 1.09 = por ahí se fugaba el eco durante el habla del usuario).
-  // nearend_tuning y dominant_nearend_detection quedan en STOCK: el modo
-  // near-end dominante existe justamente para proteger la voz del usuario en
-  // double-talk. La 6ª QA demostró que endurecerlo lo silencia ("solo se ve
-  // cuando se pausa el audio"). El eco que se fugue por esta transparencia
-  // lo caza el dedup TEXTUAL (native.engine.ts) — determinístico.
-  return cfg;
-}
-
-class TunedEc3Factory : public webrtc::EchoControlFactory {
- public:
-  std::unique_ptr<webrtc::EchoControl> Create(int sample_rate_hz,
-                                              int num_render_channels,
-                                              int num_capture_channels) override {
-    return std::make_unique<webrtc::EchoCanceller3>(
-        aggressiveEc3Config(), std::nullopt, sample_rate_hz,
-        static_cast<size_t>(num_render_channels),
-        static_cast<size_t>(num_capture_channels));
-  }
-};
-
-} // namespace
+// NOTA (RE del binario de Granola, os/granola-desktop.md §3.4): Granola usa
+// el EchoCanceller3Config DE FÁBRICA, sin un solo override — su constructor
+// default va directo al factory sin tocar ningún campo. Nuestro tuning
+// agresivo del suppressor (masks bajas) fue la dirección EQUIVOCADA: dañaba
+// el near-end (half-duplex) sin arreglar el eco de parlante saturado. Su
+// ventaja está UPSTREAM del AEC3 (delay externo + render/capture alineados a
+// rate nativa). Por eso acá NO tuneamos el EC3 — el APM usa su AEC3 stock.
 
 struct ApmHandle {
   rtc::scoped_refptr<webrtc::AudioProcessing> apm;
@@ -93,14 +50,9 @@ ApmHandle* apm_create(int render_rate_hz, int capture_rate_hz) {
     return nullptr;
   }
 
-  webrtc::AudioProcessingBuilder builder;
-  // UYARI_AEC_TUNING=default deja el EC3 de fábrica (para A/B); si no, se
-  // inyecta el tuning agresivo de transcripción.
-  const char* tuning = std::getenv("UYARI_AEC_TUNING");
-  if (!(tuning && std::string_view(tuning) == "default")) {
-    builder.SetEchoControlFactory(std::make_unique<TunedEc3Factory>());
-  }
-  auto apm = builder.Create();
+  // AEC3 STOCK (sin factory custom): idéntico a Granola. La separación limpia
+  // viene de la alineación upstream, no del tuning del EC3.
+  auto apm = webrtc::AudioProcessingBuilder().Create();
   if (!apm) return nullptr;
 
   webrtc::AudioProcessing::Config config;

@@ -297,6 +297,9 @@ var lastRenderFeedNs: UInt64 = 0
 // Pico reciente del render (far-end), para el gate de eco residual. Se
 // decae por frame para reflejar "qué tan fuerte suena el sistema AHORA".
 var renderPeakRecent: Int32 = 0
+// Pico reciente del mic CRUDO (pre-AEC), mismo decaimiento: el gate compara
+// la salida del AEC contra esto — si el AEC removió la mayoría, era eco.
+var rawMicPeakRecent: Int32 = 0
 
 func feedRender(_ frame: inout [Int16]) {
     guard let apm = apmHandle else { return }
@@ -561,7 +564,14 @@ let auhalInputProc: AURenderCallback = { _, ioActionFlags, inTimeStamp, inBusNum
 
     let frames = Int(inNumberFrames)
     let mono = Array(UnsafeBufferPointer(start: auhalRenderMem, count: frames))
-    for s in mono where abs(s) > micPeak { micPeak = abs(s) }
+    var rawPeakF: Float = 0
+    for s in mono {
+        let a = abs(s)
+        if a > micPeak { micPeak = a }
+        if a > rawPeakF { rawPeakF = a }
+    }
+    let rawPeak = Int32(min(rawPeakF, 1) * 32767)
+    rawMicPeakRecent = max(rawPeak, rawMicPeakRecent - (rawMicPeakRecent >> 4))
 
     // Near-end del AEC3: cancela el eco A LA RATE NATIVA del dispositivo
     // (antes del downsample, ver sección AEC3); el audio ya limpio baja a
@@ -580,25 +590,26 @@ let auhalInputProc: AURenderCallback = { _, ioActionFlags, inTimeStamp, inBusNum
             // GATE de eco residual (para transcripción): a volumen alto el
             // parlante distorsiona y el residuo no-lineal supera lo que el
             // supresor puede estimar (medido: picos >2000 con el sistema a
-            // 75%). Regla: si el sistema suena FUERTE y lo que salió del AEC
-            // es débil EN RELACIÓN, es residuo → se silencia el frame. La
-            // voz real del usuario supera el umbral relativo (su mic la
-            // capta mucho más fuerte que el eco) y pasa intacta.
+            // 75%). Discriminador: comparar la salida del AEC contra el mic
+            // CRUDO — si el AEC removió la mayoría del frame, era eco (se
+            // silencia el resto); si lo preservó, es la voz del usuario y
+            // pasa SIN importar el volumen del video. (La v1 comparaba
+            // contra el pico del RENDER y se comía la voz del usuario a
+            // distancia normal — el crudo es la vara correcta.)
             if !aecBypassedNow() {
                 let renderPeak = renderPeakRecent
-                if renderPeak > 3000 {
+                let rawPeak = rawMicPeakRecent
+                if renderPeak > 3000 && rawPeak > 0 {
                     var framePeak: Int32 = 0
                     for s in frame {
                         let a = Int32(s.magnitude)
                         if a > framePeak { framePeak = a }
                     }
-                    // 0.35: el residuo no-lineal medido llega a ~1/3 del pico
-                    // del render a volumen alto. La voz real del usuario en el
-                    // mic supera esto con margen (habla normal ~15-30k de
-                    // pico); el costo es half-duplex con voz MUY baja mientras
-                    // el sistema suena fuerte — aceptable para transcripción.
-                    let threshold = max(2000, renderPeak * 35 / 100)
-                    if framePeak < threshold {
+                    // Eco puro medido: el AEC deja pasar <25% del pico crudo.
+                    // Voz del usuario: el AEC la preserva (ratio ≈ 1). Umbral
+                    // 45% + tope absoluto (nunca silenciar salida claramente
+                    // fuerte, por si el crudo decae raro entre callbacks).
+                    if framePeak < rawPeak * 45 / 100 && framePeak < 6000 {
                         for i in 0..<frame.count { frame[i] = 0 }
                     }
                 }

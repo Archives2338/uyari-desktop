@@ -46,6 +46,9 @@ export function registerIpc({ settings, api, meetings, overlay }: Services): voi
     api.listMeetings(params),
   )
   ipcMain.handle(IPC.meetingsGet, (_e, clientSessionId: string) => api.getMeeting(clientSessionId))
+  ipcMain.handle(IPC.meetingsSaveNotes, (_e, clientSessionId: string, userNotes: string) =>
+    api.saveNotes(clientSessionId, userNotes),
+  )
   ipcMain.handle(IPC.meetingsAsk, (_e, clientSessionId: string, question: string) =>
     api.ask(clientSessionId, question),
   )

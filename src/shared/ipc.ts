@@ -28,6 +28,7 @@ export const IPC = {
   captureState: 'capture:state',
   meetingsList: 'meetings:list',
   meetingsGet: 'meetings:get',
+  meetingsSaveNotes: 'meetings:save-notes',
   meetingsAsk: 'meetings:ask',
   /** "Pregúntale a Uyari" global — contra el historial, con citas. */
   meetingsAskAll: 'meetings:ask-all',
@@ -82,6 +83,8 @@ export interface UyariBridge {
   meetings: {
     list(params?: { cursor?: string; limit?: number }): Promise<MeetingListPage>
     get(clientSessionId: string): Promise<MeetingDetailData>
+    /** Guarda las notas editables del usuario (el scratchpad, Fase 5a). */
+    saveNotes(clientSessionId: string, userNotes: string): Promise<{ ok: boolean }>
     ask(clientSessionId: string, question: string): Promise<{ answer: string }>
     /** Chat global: pregunta contra el historial, con citas trazables.
      *  `meetingIds` acota el alcance; sin acotar usa las más recientes.

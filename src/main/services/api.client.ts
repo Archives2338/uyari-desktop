@@ -181,6 +181,14 @@ export class ApiClient {
     return this.request(`/meetings/${clientSessionId}`)
   }
 
+  /** Guarda las notas editables del usuario (el scratchpad, Fase 5a). */
+  saveNotes(clientSessionId: string, userNotes: string): Promise<{ ok: boolean }> {
+    return this.request(`/meetings/${clientSessionId}/notes`, {
+      method: 'PUT',
+      body: JSON.stringify({ userNotes }),
+    })
+  }
+
   /** Activa (idempotente) el link público y devuelve la URL para compartir. */
   share(clientSessionId: string): Promise<{ url: string }> {
     return this.request(`/meetings/${clientSessionId}/share`, { method: 'POST', body: '{}' })

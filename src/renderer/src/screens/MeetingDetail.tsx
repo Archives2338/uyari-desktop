@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '@renderer/store'
 import { Button } from '@renderer/ui/Button'
 import { dIcon } from '@renderer/ui/chrome'
@@ -37,6 +37,15 @@ export function MeetingDetail({ clientSessionId }: { clientSessionId: string }):
   const [question, setQuestion] = useState('')
   const [qa, setQa] = useState<QaEntry[]>([])
 
+  // Notas editables del usuario (Fase 5a — el scratchpad estilo Granola).
+  // Autosave debounced; conviven con el resumen IA (nunca lo pisan).
+  const [notes, setNotes] = useState('')
+  const [notesStatus, setNotesStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const notesInit = useRef(false) // solo inicializar del server UNA vez
+  const notesLatest = useRef('') // último valor tipeado (flush en unmount)
+  const notesSaved = useRef('') // último valor persistido (evita saves noop)
+  const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   useEffect(() => {
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
@@ -65,6 +74,57 @@ export function MeetingDetail({ clientSessionId }: { clientSessionId: string }):
     return () => {
       cancelled = true
       if (timer) clearTimeout(timer)
+    }
+  }, [clientSessionId])
+
+  // Inicializar las notas del server UNA sola vez (el polling del resumen
+  // recarga `meeting`; sin este guard, cada recarga pisaría lo que el
+  // usuario está tipeando). El componente remonta al cambiar de reunión
+  // (key en App.tsx), así que los refs arrancan limpios solos.
+  useEffect(() => {
+    if (meeting && !notesInit.current) {
+      const initial = meeting.userNotes ?? ''
+      notesInit.current = true
+      setNotes(initial)
+      notesLatest.current = initial
+      notesSaved.current = initial
+    }
+  }, [meeting])
+
+  const persistNotes = useCallback(
+    async (value: string): Promise<void> => {
+      if (value === notesSaved.current) return
+      setNotesStatus('saving')
+      try {
+        await window.uyari.meetings.saveNotes(clientSessionId, value)
+        notesSaved.current = value
+        setNotesStatus('saved')
+        setTimeout(() => setNotesStatus((s) => (s === 'saved' ? 'idle' : s)), 1500)
+      } catch {
+        // Best-effort: no molestar con un error de red por cada tecla. El
+        // valor sigue en el textarea y el próximo save (o el flush de
+        // unmount) reintenta.
+        setNotesStatus('idle')
+      }
+    },
+    [clientSessionId],
+  )
+
+  const onNotesChange = (value: string): void => {
+    setNotes(value)
+    notesLatest.current = value
+    if (notesTimer.current) clearTimeout(notesTimer.current)
+    notesTimer.current = setTimeout(() => void persistNotes(value), 800)
+  }
+
+  // Flush al salir: si quedó algo sin guardar (usuario cierra antes de los
+  // 800ms), dispararlo. El IPC llega aunque el componente ya no exista.
+  useEffect(() => {
+    return () => {
+      if (notesTimer.current) clearTimeout(notesTimer.current)
+      if (notesLatest.current !== notesSaved.current) {
+        void window.uyari.meetings.saveNotes(clientSessionId, notesLatest.current).catch(() => {})
+      }
     }
   }, [clientSessionId])
 
@@ -157,6 +217,25 @@ export function MeetingDetail({ clientSessionId }: { clientSessionId: string }):
                   <span>{new Date(meeting.startedAt).toLocaleString()}</span>
                   {meeting.summary && <StatusBadge status={meeting.summary.status} />}
                 </div>
+              </div>
+
+              <div className="detail-notes">
+                <div className="detail-notes-head">
+                  <span className="detail-section-title">My notes</span>
+                  <span className="detail-notes-status">
+                    {notesStatus === 'saving' ? 'Saving…' : notesStatus === 'saved' ? 'Saved' : ''}
+                  </span>
+                </div>
+                <textarea
+                  className="detail-notes-area"
+                  placeholder="Jot down your own notes… they stay private to you, alongside the AI summary."
+                  value={notes}
+                  onChange={(e) => onNotesChange(e.target.value)}
+                  onBlur={() => {
+                    if (notesTimer.current) clearTimeout(notesTimer.current)
+                    void persistNotes(notesLatest.current)
+                  }}
+                />
               </div>
 
               <SummaryPanel summary={meeting.summary} />

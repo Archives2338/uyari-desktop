@@ -83,6 +83,8 @@ export interface MeetingDetailData {
   endedAt?: string | null
   summary: MeetingSummary | null
   segments: TranscriptSegmentRow[]
+  /** Notas editables del usuario (Fase 5a, el scratchpad). null = vacías. */
+  userNotes?: string | null
 }
 
 export interface MeetingListItem {

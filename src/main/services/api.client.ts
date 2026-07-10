@@ -86,6 +86,16 @@ export class ApiClient {
     }
   }
 
+  /** Token efímero de Deepgram (nova-3), como subprotocolo del WebSocket. */
+  async deepgramToken(): Promise<{ provider: 'deepgram'; token: string; expiresInSeconds: number }> {
+    try {
+      return await this.request('/stt/deepgram-token', { method: 'POST', body: '{}' })
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 402) throw new SttQuotaError()
+      throw err
+    }
+  }
+
   /** Reporta segundos de STT consumidos (best-effort; medición del plan). */
   reportSttUsage(seconds: number): Promise<{ ok: boolean }> {
     return this.request('/stt/usage', { method: 'POST', body: JSON.stringify({ seconds }) })

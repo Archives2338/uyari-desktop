@@ -1,17 +1,16 @@
 import type { CaptureEngine } from './engine'
 import { MockCaptureEngine } from './mock.engine'
 import { NativeCaptureEngine } from './native.engine'
-import {
-  AssemblyAiMicEngine,
-  type MicControlPort,
-  type SttTokenProvider,
-} from './assemblyai.engine'
+import { AssemblyAiMicEngine, type MicControlPort } from './assemblyai.engine'
+import type { SttProvider } from './stt-stream'
 
 export type { CaptureEngine } from './engine'
 export type { MicControlPort } from './assemblyai.engine'
 
 export interface CaptureDeps {
-  api: SttTokenProvider
+  // El ApiClient implementa ambos proveedores de token (AssemblyAI + Deepgram);
+  // el canal STT elige según UYARI_STT.
+  api: SttProvider
   mic: MicControlPort
 }
 

@@ -2,9 +2,10 @@ import { spawn, type ChildProcessByStdio } from 'node:child_process'
 import type { Readable, Writable } from 'node:stream'
 import { helperPath } from './helper-path'
 import { BaseCaptureEngine, type CaptureStartOptions } from './engine'
-import { AssemblyAiStream, STREAM_SAMPLE_RATE } from './assemblyai.stream'
+import { STREAM_SAMPLE_RATE } from './assemblyai.stream'
+import { createSttStream, type SttStream, type SttProvider } from './stt-stream'
 import type { CaptionSegment, CaptureStatus } from '@shared/domain'
-import type { MicControlPort, SttTokenProvider } from './assemblyai.engine'
+import type { MicControlPort } from './assemblyai.engine'
 
 // Motor "fase 2c": DOS canales STT con separación de hablantes de fábrica.
 //   - "You"  → micrófono capturado por el helper con voice processing
@@ -59,8 +60,8 @@ function contentTokens(text: string): string[] {
 }
 
 export class NativeCaptureEngine extends BaseCaptureEngine {
-  private readonly you: AssemblyAiStream
-  private readonly them: AssemblyAiStream
+  private readonly you: SttStream
+  private readonly them: SttStream
   private helper: ChildProcessByStdio<Writable, Readable, Readable> | null = null
   private stdoutRemainder: Buffer = Buffer.alloc(0)
   private stopping = false
@@ -73,12 +74,12 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
   private statusByChannel = new Map<string, CaptureStatus>()
 
   constructor(
-    api: SttTokenProvider,
+    api: SttProvider,
     private readonly mic: MicControlPort,
   ) {
     super()
-    this.you = new AssemblyAiStream(api, { speaker: 'You', channel: 'you' })
-    this.them = new AssemblyAiStream(api, { speaker: 'Them', channel: 'them' })
+    this.you = createSttStream(api, { speaker: 'You', channel: 'you' })
+    this.them = createSttStream(api, { speaker: 'Them', channel: 'them' })
     for (const [channel, stream] of [
       ['you', this.you],
       ['them', this.them],

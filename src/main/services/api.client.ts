@@ -21,6 +21,13 @@ export class ApiError extends Error {
   }
 }
 
+interface DeepgramTokenResponse {
+  provider: 'deepgram'
+  token: string
+  expiresInSeconds: number
+  ephemeral: boolean
+}
+
 /** El plan del usuario agotó su cuota mensual de transcripción (STT). */
 export class SttQuotaError extends Error {
   readonly code = 'STT_QUOTA_EXCEEDED'
@@ -86,23 +93,52 @@ export class ApiClient {
     }
   }
 
+  private dgToken: { value: DeepgramTokenResponse; expiresAt: number } | null = null
+  private dgTokenInflight: Promise<DeepgramTokenResponse> | null = null
+
   /**
    * Token de Deepgram para el subprotocolo del WebSocket. `ephemeral` decide
    * el esquema: JWT del grant → 'bearer'; API key directa (fallback dev) →
    * 'token' (ver deepgram.stream.ts).
+   *
+   * CACHEADO con margen de 60 s (patrón Granola): los dos canales (you/them)
+   * arrancan a la vez y compartían destino — sin caché eran 2 round-trips al
+   * backend (+ grant de Deepgram) en el camino crítico del primer texto, y
+   * uno más en cada reconexión.
    */
-  async deepgramToken(): Promise<{
-    provider: 'deepgram'
-    token: string
-    expiresInSeconds: number
-    ephemeral: boolean
-  }> {
-    try {
-      return await this.request('/stt/deepgram-token', { method: 'POST', body: '{}' })
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 402) throw new SttQuotaError()
-      throw err
-    }
+  async deepgramToken(): Promise<DeepgramTokenResponse> {
+    if (this.dgToken && Date.now() < this.dgToken.expiresAt) return this.dgToken.value
+    if (this.dgTokenInflight) return this.dgTokenInflight
+    this.dgTokenInflight = (async () => {
+      try {
+        const fresh = await this.request<DeepgramTokenResponse>('/stt/deepgram-token', {
+          method: 'POST',
+          body: '{}',
+        })
+        this.dgToken = {
+          value: fresh,
+          expiresAt: Date.now() + Math.max(0, fresh.expiresInSeconds - 60) * 1000,
+        }
+        return fresh
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 402) throw new SttQuotaError()
+        throw err
+      } finally {
+        this.dgTokenInflight = null
+      }
+    })()
+    return this.dgTokenInflight
+  }
+
+  /**
+   * Precalienta el token de STT (fire-and-forget) al detectar una reunión,
+   * ANTES de que el usuario pulse grabar: el fetch sale del camino crítico
+   * del arranque. Solo Deepgram — el token de AssemblyAI es de un solo uso.
+   * Sin sesión o sin cuota: silencioso, el error real saldrá al grabar.
+   */
+  prefetchSttToken(): void {
+    if (process.env.UYARI_STT !== 'deepgram') return
+    void this.deepgramToken().catch(() => {})
   }
 
   /** Reporta segundos de STT consumidos (best-effort; medición del plan). */

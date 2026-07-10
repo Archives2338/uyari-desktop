@@ -149,6 +149,9 @@ if (!app.requestSingleInstanceLock()) {
       const state = meetings.state()
       if (state && state.status !== 'error') return
       broadcast(IPC.evMeetingDetected, { label }) // pista in-app inmediata
+      // Precalentar el token de STT ya mismo: cuando el usuario pulse
+      // "Start recording", el fetch ya no está en el camino crítico.
+      api.prefetchSttToken()
       // Banner flotante con delay: no encimarlo mientras Zoom se abre (ver
       // BANNER_DELAY_MS). Un solo pendiente a la vez.
       if (bannerPending || banner) return

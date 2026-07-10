@@ -215,15 +215,35 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
   async start(opts?: CaptureStartOptions): Promise<void> {
     this.stopping = false
     this.micReady = false
-    // El canal del mic es el principal: si su STT falla, la sesión falla.
-    await this.you.start(opts)
+    // TODO EN PARALELO (mismo patrón que resumeCapture): start() marca cada
+    // stream como receptivo de forma SÍNCRONA antes de conectar, así el
+    // helper arranca YA y sus frames esperan en el backlog mientras los WS
+    // abren. Serializar (token+WS you → token+WS them → helper) costaba
+    // ~1-2 s extra de "Starting microphone…" en cada arranque.
+    const youStarted = this.you.start(opts)
+    const themStarted = this.them.start(opts)
+    this.spawnHelper()
     try {
-      await this.them.start(opts)
-      this.spawnHelper()
+      // El canal del mic es el principal: si su STT falla, la sesión falla.
+      await youStarted
+    } catch (err) {
+      void themStarted.catch(() => {})
+      this.stopping = true
+      await this.killHelper()
+      await Promise.all([this.you.stop(), this.them.stop()])
+      throw err
+    }
+    try {
+      await themStarted
     } catch (err) {
       console.error('[native] canal de sistema no disponible:', err)
       await this.them.stop()
-      this.fallbackToRendererMic('System audio unavailable — only your microphone is being transcribed.')
+      this.statusByChannel.delete('them')
+      // El helper sigue vivo: el mic nativo (AEC3) es muy superior al del
+      // renderer; solo se pierde la transcripción del audio de sistema.
+      this.emitAggregateStatus(
+        'System audio unavailable — only your microphone is being transcribed.',
+      )
     }
   }
 
@@ -367,34 +387,39 @@ export class NativeCaptureEngine extends BaseCaptureEngine {
     if (this.rendererMicActive) this.you.acceptAudio(chunk)
   }
 
+  /**
+   * Mata al helper y ESPERA a que muera antes de resolver: si el usuario
+   * hace stop→start rápido, dos motores de voz conviviendo dejan mudo el
+   * mic de la sesión nueva.
+   */
+  private async killHelper(): Promise<void> {
+    const helper = this.helper
+    if (!helper) return
+    this.helper = null
+    await new Promise<void>((resolve) => {
+      const done = (): void => resolve()
+      helper.once('exit', done)
+      try {
+        helper.stdin.end() // salida limpia (EOF)
+      } catch {
+        // seguir con el kill
+      }
+      setTimeout(() => helper.kill('SIGTERM'), 300)
+      setTimeout(() => {
+        helper.removeListener('exit', done)
+        helper.kill('SIGKILL')
+        resolve()
+      }, 1200)
+    })
+  }
+
   async stop(): Promise<void> {
     this.stopping = true
     if (this.rendererMicActive) {
       this.mic.stop()
       this.rendererMicActive = false
     }
-    if (this.helper) {
-      // ESPERAR a que el helper muera antes de resolver: si el usuario
-      // hace stop→start rápido, dos motores de voz conviviendo dejan mudo
-      // el mic de la sesión nueva.
-      const helper = this.helper
-      this.helper = null
-      await new Promise<void>((resolve) => {
-        const done = (): void => resolve()
-        helper.once('exit', done)
-        try {
-          helper.stdin.end() // salida limpia (EOF)
-        } catch {
-          // seguir con el kill
-        }
-        setTimeout(() => helper.kill('SIGTERM'), 300)
-        setTimeout(() => {
-          helper.removeListener('exit', done)
-          helper.kill('SIGKILL')
-          resolve()
-        }, 1200)
-      })
-    }
+    await this.killHelper()
     await Promise.all([this.you.stop(), this.them.stop()])
     this.emitStatus('idle')
   }

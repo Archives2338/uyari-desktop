@@ -294,9 +294,17 @@ var apmCaptureErrLogged = false
 // (medido: 18 dB → 8.7 dB con un feeder que metía ceros por carrera).
 let renderFeedLock = NSLock()
 var lastRenderFeedNs: UInt64 = 0
+// Pico reciente del render (far-end), para el gate de eco residual. Se
+// decae por frame para reflejar "qué tan fuerte suena el sistema AHORA".
+var renderPeakRecent: Int32 = 0
 
 func feedRender(_ frame: inout [Int16]) {
     guard let apm = apmHandle else { return }
+    var peak: Int32 = 0
+    for s in frame {
+        let a = Int32(s.magnitude)
+        if a > peak { peak = a }
+    }
     renderFeedLock.lock()
     frame.withUnsafeMutableBufferPointer {
         let status = apm_process_render(apm, $0.baseAddress)
@@ -306,6 +314,9 @@ func feedRender(_ frame: inout [Int16]) {
         }
     }
     lastRenderFeedNs = DispatchTime.now().uptimeNanoseconds
+    // Pico con decaimiento (~93%/frame ≈ mitad cada ~90 ms): "cuánto suena
+    // el sistema ahora", robusto a pausas cortas entre sílabas.
+    renderPeakRecent = max(peak, renderPeakRecent - (renderPeakRecent >> 4))
     renderFeedLock.unlock()
 }
 
@@ -564,6 +575,32 @@ let auhalInputProc: AURenderCallback = { _, ioActionFlags, inTimeStamp, inBusNum
                 if status != 0 && !apmCaptureErrLogged {
                     apmCaptureErrLogged = true
                     log("AEC3: process_capture devolvió \(status) — el mic NO se está procesando")
+                }
+            }
+            // GATE de eco residual (para transcripción): a volumen alto el
+            // parlante distorsiona y el residuo no-lineal supera lo que el
+            // supresor puede estimar (medido: picos >2000 con el sistema a
+            // 75%). Regla: si el sistema suena FUERTE y lo que salió del AEC
+            // es débil EN RELACIÓN, es residuo → se silencia el frame. La
+            // voz real del usuario supera el umbral relativo (su mic la
+            // capta mucho más fuerte que el eco) y pasa intacta.
+            if !aecBypassedNow() {
+                let renderPeak = renderPeakRecent
+                if renderPeak > 3000 {
+                    var framePeak: Int32 = 0
+                    for s in frame {
+                        let a = Int32(s.magnitude)
+                        if a > framePeak { framePeak = a }
+                    }
+                    // 0.35: el residuo no-lineal medido llega a ~1/3 del pico
+                    // del render a volumen alto. La voz real del usuario en el
+                    // mic supera esto con margen (habla normal ~15-30k de
+                    // pico); el costo es half-duplex con voz MUY baja mientras
+                    // el sistema suena fuerte — aceptable para transcripción.
+                    let threshold = max(2000, renderPeak * 35 / 100)
+                    if framePeak < threshold {
+                        for i in 0..<frame.count { frame[i] = 0 }
+                    }
                 }
             }
         }
@@ -861,6 +898,12 @@ func updateStreamDelay() {
 }
 
 var aecBypassed: Bool? = nil // nil = aún no evaluado (fuerza el primer log)
+
+// Estado actual del bypass para el gate (con auriculares no hay eco → el
+// gate no debe actuar). Lectura barata desde el callback de audio.
+func aecBypassedNow() -> Bool {
+    return aecBypassed == true
+}
 
 func updateAecBypass() {
     guard let apm = apmHandle else { return }

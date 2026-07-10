@@ -43,15 +43,15 @@ webrtc::EchoCanceller3Config aggressiveEc3Config() {
   // habla (1-4 kHz). Tunear solo lf no mueve la aguja (medido).
   // normal (el usuario no domina): agresivo — sin costo para su voz.
   s.normal_tuning.mask_lf =
-      webrtc::EchoCanceller3Config::Suppressor::MaskingThresholds(.001f, .004f, .3f);
+      webrtc::EchoCanceller3Config::Suppressor::MaskingThresholds(.001f, .002f, .001f);
   s.normal_tuning.mask_hf =
-      webrtc::EchoCanceller3Config::Suppressor::MaskingThresholds(.001f, .004f, .3f);
+      webrtc::EchoCanceller3Config::Suppressor::MaskingThresholds(.001f, .002f, .001f);
   // nearend (double-talk): protector pero NO transparente como el default
   // (lf 1.09 = por ahí se fugaba el eco durante el habla del usuario).
   s.nearend_tuning.mask_lf =
-      webrtc::EchoCanceller3Config::Suppressor::MaskingThresholds(.002f, .008f, .3f);
+      webrtc::EchoCanceller3Config::Suppressor::MaskingThresholds(.002f, .004f, .002f);
   s.nearend_tuning.mask_hf =
-      webrtc::EchoCanceller3Config::Suppressor::MaskingThresholds(.002f, .008f, .3f);
+      webrtc::EchoCanceller3Config::Suppressor::MaskingThresholds(.002f, .004f, .002f);
   // Semántica REAL (dominant_nearend_detector.cc): entra al modo near-end
   // cuando echo < enr_threshold × nearend — BAJARLO lo hace más difícil.
   s.dominant_nearend_detection.enr_threshold = .1f;    // default .25

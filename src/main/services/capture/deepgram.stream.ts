@@ -51,7 +51,9 @@ function isQuotaError(err: unknown): boolean {
 }
 
 export interface DeepgramTokenProvider {
-  deepgramToken(): Promise<{ token: string }>
+  // ephemeral=true → JWT del grant (esquema 'bearer'); false → API key
+  // directa, fallback de dev (esquema 'token').
+  deepgramToken(): Promise<{ token: string; ephemeral: boolean }>
 }
 
 interface DgResults {
@@ -120,14 +122,17 @@ export class DeepgramStream extends EventEmitter {
           throw err instanceof Error ? err : new Error(String(err))
         }
         const delay = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)]
-        console.warn(`${this.tag()} conexión inicial falló (intento ${attempt + 1}), reintenta en ${delay} ms`)
+        const why = err instanceof Error ? err.message : String(err)
+        console.warn(`${this.tag()} conexión inicial falló (intento ${attempt + 1}: ${why}), reintenta en ${delay} ms`)
         await new Promise((r) => setTimeout(r, delay))
       }
     }
   }
 
   private async connect(): Promise<void> {
-    const { token } = await this.api.deepgramToken()
+    const { token, ephemeral } = await this.api.deepgramToken()
+    // JWT efímero del grant → 'bearer'; API key directa (dev) → 'token'.
+    const scheme = ephemeral ? 'bearer' : 'token'
 
     const url = new URL(DG_URL)
     url.searchParams.set('model', 'nova-3')
@@ -142,7 +147,7 @@ export class DeepgramStream extends EventEmitter {
 
     await new Promise<void>((resolve, reject) => {
       // Token como subprotocolo (browser-safe, sin headers custom).
-      const ws = new WebSocket(url, ['token', token])
+      const ws = new WebSocket(url, [scheme, token])
       ws.binaryType = 'arraybuffer'
       this.ws = ws
       let opened = false

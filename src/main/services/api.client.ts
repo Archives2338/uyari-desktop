@@ -86,8 +86,17 @@ export class ApiClient {
     }
   }
 
-  /** Token efímero de Deepgram (nova-3), como subprotocolo del WebSocket. */
-  async deepgramToken(): Promise<{ provider: 'deepgram'; token: string; expiresInSeconds: number }> {
+  /**
+   * Token de Deepgram para el subprotocolo del WebSocket. `ephemeral` decide
+   * el esquema: JWT del grant → 'bearer'; API key directa (fallback dev) →
+   * 'token' (ver deepgram.stream.ts).
+   */
+  async deepgramToken(): Promise<{
+    provider: 'deepgram'
+    token: string
+    expiresInSeconds: number
+    ephemeral: boolean
+  }> {
     try {
       return await this.request('/stt/deepgram-token', { method: 'POST', body: '{}' })
     } catch (err) {

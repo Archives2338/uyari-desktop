@@ -23,6 +23,15 @@ interface AppStore {
   refreshPermissions(): Promise<void>
   login(email: string): Promise<void>
   startCapture(title?: string): Promise<void>
+  /** Reanuda una nota terminada: retoma la captura sobre su mismo
+   *  clientSessionId y sale de modo pasado. El dock en vivo arranca VACÍO
+   *  (como Granola: solo el stream nuevo; el transcript viejo vive en la nota,
+   *  no se re-inyecta en la burbuja). El offset continúa tras lo ya transcrito. */
+  resumeMeeting(input: {
+    clientSessionId: string
+    title: string
+    baseOffsetMs: number
+  }): Promise<void>
   stopCapture(): Promise<void>
   pauseCapture(): Promise<void>
   resumeCapture(): Promise<void>
@@ -57,6 +66,21 @@ export const useApp = create<AppStore>((set, get) => ({
   startCapture: async (title) => {
     const session = await window.uyari.capture.start(title)
     set({ session, captions: [], detectedMeeting: null, noteMinimized: false })
+  },
+
+  resumeMeeting: async ({ clientSessionId, title, baseOffsetMs }) => {
+    const session = await window.uyari.capture.start(title, { clientSessionId, baseOffsetMs })
+    // captions arranca VACÍO (como Granola): el dock en vivo solo muestra el
+    // stream nuevo. El transcript viejo NO se re-inyecta en la burbuja; sigue
+    // en la nota y reaparece completo (viejo + nuevo) al terminar (modo pasado).
+    // openMeetingId:null sale de modo pasado y entra a la nota en vivo.
+    set({
+      session,
+      captions: [],
+      openMeetingId: null,
+      detectedMeeting: null,
+      noteMinimized: false,
+    })
   },
 
   stopCapture: async () => {

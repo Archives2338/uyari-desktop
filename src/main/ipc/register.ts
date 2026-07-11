@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { IPC } from '@shared/ipc'
+import { IPC, type ResumeDescriptor } from '@shared/ipc'
 import type { AuthState } from '@shared/domain'
 import type { ApiClient } from '../services/api.client'
 import type { SettingsStore } from '../services/settings.store'
@@ -40,7 +40,9 @@ export function registerIpc({ settings, api, meetings, overlay }: Services): voi
     permissionsService.openScreenRecordingSettings(),
   )
 
-  ipcMain.handle(IPC.captureStart, (_e, title?: string) => meetings.start(title))
+  ipcMain.handle(IPC.captureStart, (_e, title?: string, resume?: ResumeDescriptor) =>
+    meetings.start(title, resume),
+  )
   ipcMain.handle(IPC.captureStop, () => meetings.stop())
   ipcMain.handle(IPC.capturePause, () => meetings.pause())
   ipcMain.handle(IPC.captureResume, () => meetings.resume())

@@ -39,6 +39,7 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
   const stopCapture = useApp((s) => s.stopCapture)
   const minimizeNote = useApp((s) => s.minimizeNote)
   const closeMeeting = useApp((s) => s.closeMeeting)
+  const resumeMeeting = useApp((s) => s.resumeMeeting)
 
   const clientSessionId = pastId ?? session?.clientSessionId ?? ''
   const paused = session?.status === 'paused'
@@ -191,6 +192,23 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
       .regenerateSummary(clientSessionId, template)
       .then(() => setReloadTick((t) => t + 1))
       .catch(() => setReloadTick((t) => t + 1))
+  }
+
+  // Reanudar una nota terminada: retoma la captura sobre el MISMO
+  // clientSessionId, arrancando el tramo nuevo justo después de lo ya
+  // transcrito (patrón Granola: "el stop es una pausa que nadie retomó").
+  const onResume = (): void => {
+    if (!past) return
+    // El tramo nuevo arranca justo después del último segmento ya transcrito,
+    // para que sus offsets no se solapen con lo previo (el orden en la vista
+    // pasada, al terminar, queda correcto). El dock en vivo, en cambio, arranca
+    // vacío — no re-mostramos el transcript viejo (como Granola).
+    const maxOffset = (past.segments ?? []).reduce((m, s) => Math.max(m, s.tsOffsetMs), 0)
+    void resumeMeeting({
+      clientSessionId: pastId!,
+      title: past.title ?? '',
+      baseOffsetMs: maxOffset + 2000, // hueco de 2 s tras lo previo
+    })
   }
 
   const back = (): void => (isPast ? closeMeeting() : minimizeNote())
@@ -387,6 +405,18 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
           )}
 
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            {/* Reanudar — solo en pasado: retoma la transcripción sobre la
+                misma nota (Granola nunca "termina" del todo una reunión) */}
+            {isPast && (
+              <div
+                onClick={onResume}
+                title="Reanudar la transcripción de esta nota"
+                style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-pill)', padding: '9px 15px', boxShadow: 'var(--shadow-card)', cursor: 'pointer', color: 'var(--ink-2)', font: 'var(--label-sm)', fontSize: 13 }}
+              >
+                <span style={{ display: 'inline-flex', width: 8, height: 8, borderRadius: '50%', background: '#e5484d' }} />
+                Reanudar
+              </div>
+            )}
             {/* píldora de captura — solo en vivo */}
             {!isPast && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-pill)', padding: '11px 15px', boxShadow: 'var(--shadow-card)' }}>

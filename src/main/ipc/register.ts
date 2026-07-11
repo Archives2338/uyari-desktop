@@ -54,6 +54,17 @@ export function registerIpc({ settings, api, meetings, overlay }: Services): voi
   ipcMain.handle(IPC.meetingsSaveNotes, (_e, clientSessionId: string, userNotes: string) =>
     api.saveNotes(clientSessionId, userNotes),
   )
+  ipcMain.handle(IPC.meetingsSaveTitle, (_e, clientSessionId: string, title: string) =>
+    api.saveTitle(clientSessionId, title),
+  )
+  ipcMain.handle(IPC.meetingsSaveSummary, (_e, clientSessionId: string, content: string) =>
+    api.saveSummary(clientSessionId, content),
+  )
+  ipcMain.handle(
+    IPC.meetingsRegenerateSummary,
+    (_e, clientSessionId: string, template?: string) =>
+      api.regenerateSummary(clientSessionId, template),
+  )
   ipcMain.handle(IPC.meetingsAsk, (_e, clientSessionId: string, question: string) =>
     api.ask(clientSessionId, question),
   )

@@ -670,6 +670,26 @@ body {
   color: var(--ink-4);
 }
 
+/* Reveal de las notas IA: cada bloque aparece cayendo desde arriba (efecto de
+   "escribiéndose" al estilo del stream de Granola). Escalonado por bloque. */
+@keyframes uyariReveal {
+  from {
+    opacity: 0;
+    transform: translateY(-7px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Spinner del tab "Generando…" (Enhanced Notes). */
+@keyframes uyariSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Barras de audio de la píldora de captura (NoteScreen NT1-B). */
 @keyframes uyariBar {
   0%,

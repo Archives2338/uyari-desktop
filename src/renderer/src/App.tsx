@@ -5,7 +5,6 @@ import { ThemeRoot } from '@renderer/theme/theme'
 import { OnboardingFlow } from '@renderer/onboarding/Flow'
 import { loadFlow } from '@renderer/onboarding/state'
 import { Home } from '@renderer/screens/Home'
-import { MeetingDetail } from '@renderer/screens/MeetingDetail'
 import { AskUyari } from '@renderer/screens/AskUyari'
 import { NoteScreen } from '@renderer/screens/note/NoteScreen'
 import { RecordingPill } from '@renderer/components/RecordingPill'
@@ -122,14 +121,14 @@ function MainApp(): React.JSX.Element {
           />
         </div>
       ) : openMeetingId ? (
-        <MeetingDetail key={openMeetingId} clientSessionId={openMeetingId} />
+        // Reunión terminada → la MISMA pantalla de nota, en modo pasado
+        // (documento único de Granola): notas + tab "Notas de Uyari".
+        <NoteScreen key={openMeetingId} pastId={openMeetingId} />
       ) : askOpen ? (
         <AskUyari />
       ) : session && !noteMinimized ? (
-        // Sesión activa → nota en vivo (NT1-B). Reemplaza el Home mientras se
-        // graba; abrir Ask o un detalle tiene prioridad (navegación explícita).
-        // Minimizada: se ve el Home + la RecordingPill como reingreso.
-        <NoteScreen />
+        // Sesión activa → nota en vivo. Minimizada: Home + RecordingPill.
+        <NoteScreen key="live" />
       ) : (
         <Home />
       )}

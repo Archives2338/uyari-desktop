@@ -37,6 +37,12 @@ const bridge: UyariBridge = {
     get: (clientSessionId) => ipcRenderer.invoke(IPC.meetingsGet, clientSessionId),
     saveNotes: (clientSessionId, userNotes) =>
       ipcRenderer.invoke(IPC.meetingsSaveNotes, clientSessionId, userNotes),
+    saveTitle: (clientSessionId, title) =>
+      ipcRenderer.invoke(IPC.meetingsSaveTitle, clientSessionId, title),
+    saveSummary: (clientSessionId, content) =>
+      ipcRenderer.invoke(IPC.meetingsSaveSummary, clientSessionId, content),
+    regenerateSummary: (clientSessionId, template) =>
+      ipcRenderer.invoke(IPC.meetingsRegenerateSummary, clientSessionId, template),
     ask: (clientSessionId, question) =>
       ipcRenderer.invoke(IPC.meetingsAsk, clientSessionId, question),
     askAll: (question, meetingIds, history) =>

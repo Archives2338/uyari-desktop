@@ -122,7 +122,7 @@ export function AskPopover({
       )}
       {!busy && !last && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {NOTE_RECIPES.slice(0, 3).map((r) => (
+          {NOTE_RECIPES.slice(0, 3).map((r, i) => (
             <span
               key={r}
               onClick={() => ask(r)}
@@ -137,6 +137,8 @@ export function AskPopover({
                 background: 'var(--sidebar, var(--surface-sunken))',
                 borderRadius: 'var(--radius-pill)',
                 padding: '7px 12px',
+                animation: 'uyariReveal 0.3s var(--ease-out) both',
+                animationDelay: `${i * 70}ms`,
               }}
             >
               {slashIcon}

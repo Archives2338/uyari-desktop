@@ -30,6 +30,9 @@ export const IPC = {
   meetingsList: 'meetings:list',
   meetingsGet: 'meetings:get',
   meetingsSaveNotes: 'meetings:save-notes',
+  meetingsSaveTitle: 'meetings:save-title',
+  meetingsSaveSummary: 'meetings:save-summary',
+  meetingsRegenerateSummary: 'meetings:regenerate-summary',
   meetingsAsk: 'meetings:ask',
   /** "Pregúntale a Uyari" global — contra el historial, con citas. */
   meetingsAskAll: 'meetings:ask-all',
@@ -90,6 +93,12 @@ export interface UyariBridge {
     get(clientSessionId: string): Promise<MeetingDetailData>
     /** Guarda las notas editables del usuario (el scratchpad, Fase 5a). */
     saveNotes(clientSessionId: string, userNotes: string): Promise<{ ok: boolean }>
+    /** Renombra una reunión pasada (título editable en modo pasado). */
+    saveTitle(clientSessionId: string, title: string): Promise<{ ok: boolean }>
+    /** Guarda el content editado del panel Enhanced Notes (Fase 5c). */
+    saveSummary(clientSessionId: string, content: string): Promise<{ ok: boolean }>
+    /** Genera/regenera/reintenta el resumen, con plantilla opcional. */
+    regenerateSummary(clientSessionId: string, template?: string): Promise<{ ok: boolean }>
     ask(clientSessionId: string, question: string): Promise<{ answer: string }>
     /** Chat global: pregunta contra el historial, con citas trazables.
      *  `meetingIds` acota el alcance; sin acotar usa las más recientes.

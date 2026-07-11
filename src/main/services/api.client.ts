@@ -80,7 +80,12 @@ export class ApiClient {
   }
 
   finish(clientSessionId: string): Promise<{ ok: boolean }> {
-    return this.request(`/meetings/${clientSessionId}/finish`, { method: 'POST', body: '{}' })
+    // generate:false → el desktop genera el resumen MANUAL (botón verde en el
+    // panel Enhanced Notes), patrón Granola. Solo cierra la reunión acá.
+    return this.request(`/meetings/${clientSessionId}/finish`, {
+      method: 'POST',
+      body: JSON.stringify({ generate: false }),
+    })
   }
 
   /** Token efímero para abrir el WebSocket de STT directo al proveedor. */
@@ -194,6 +199,22 @@ export class ApiClient {
     return this.request(`/meetings/${clientSessionId}/title`, {
       method: 'PUT',
       body: JSON.stringify({ title }),
+    })
+  }
+
+  /** Guarda el content EDITADO del panel Enhanced Notes (no toca el original). */
+  saveSummary(clientSessionId: string, content: string): Promise<{ ok: boolean }> {
+    return this.request(`/meetings/${clientSessionId}/summary`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    })
+  }
+
+  /** Genera / regenera / reintenta el resumen, con plantilla opcional. */
+  regenerateSummary(clientSessionId: string, template?: string): Promise<{ ok: boolean }> {
+    return this.request(`/meetings/${clientSessionId}/summary/regenerate`, {
+      method: 'POST',
+      body: JSON.stringify({ template }),
     })
   }
 

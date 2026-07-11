@@ -189,6 +189,14 @@ export class ApiClient {
     })
   }
 
+  /** Renombra la reunión (título de la nota en vivo). Vacío → "Untitled". */
+  saveTitle(clientSessionId: string, title: string): Promise<{ ok: boolean }> {
+    return this.request(`/meetings/${clientSessionId}/title`, {
+      method: 'PUT',
+      body: JSON.stringify({ title }),
+    })
+  }
+
   /** Activa (idempotente) el link público y devuelve la URL para compartir. */
   share(clientSessionId: string): Promise<{ url: string }> {
     return this.request(`/meetings/${clientSessionId}/share`, { method: 'POST', body: '{}' })

@@ -27,13 +27,13 @@ function SideItem({
         display: 'flex',
         alignItems: 'center',
         gap: 9,
-        padding: '7px 10px',
+        padding: '6px 10px',
         marginLeft: indent ? 14 : 0,
         borderRadius: 'var(--radius-sm)',
         cursor: onClick ? 'pointer' : 'default',
         background: active ? 'var(--surface-sunken)' : hover ? 'var(--violet-wash)' : 'transparent',
-        font: 'var(--text-sm)',
-        fontWeight: 500,
+        // 13px (no --text-sm=14px): un toque más compacto, a la par de Granola.
+        font: '500 13px/1.5 var(--font-sans)',
         color: active ? 'var(--text-heading)' : 'var(--ink-2)',
       }}
     >

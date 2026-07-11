@@ -45,21 +45,39 @@ export function NotesEditor({
   initialContent,
   onChange,
   onBlur,
+  placeholder = PLACEHOLDER,
+  // 'boxed' (default): borde + barra (detalle de reunión). 'free': sin borde ni
+  // barra, texto libre a lo ancho — el body de la nota en vivo (diseño NT1-B).
+  variant = 'boxed',
+  // Da acceso a la instancia del editor al montar (p.ej. para insertar la
+  // respuesta de "Enviar a la nota" desde el chat).
+  onReady,
 }: {
   initialContent: string
   onChange: (html: string) => void
   onBlur: () => void
+  placeholder?: string
+  variant?: 'boxed' | 'free'
+  onReady?: (editor: Editor) => void
 }): React.JSX.Element {
   const editor = useEditor({
-    extensions: [StarterKit, Placeholder.configure({ placeholder: PLACEHOLDER })],
+    extensions: [StarterKit, Placeholder.configure({ placeholder })],
     content: toInitialContent(initialContent),
     // El editor NO es controlado: se inicializa una vez y avisa cambios hacia
     // arriba. Vacío → '' (no '<p></p>') para que el autosave lo trate como sin
     // notas y no dispare un save espurio.
+    onCreate: ({ editor }) => onReady?.(editor),
     onUpdate: ({ editor }) => onChange(editor.isEmpty ? '' : editor.getHTML()),
     onBlur: () => onBlur(),
-    editorProps: { attributes: { class: 'notes-editor-content' } },
+    editorProps: {
+      attributes: {
+        class: variant === 'free' ? 'notes-editor-content note-body' : 'notes-editor-content',
+      },
+    },
   })
+
+  // Variante libre: solo el contenido, sin cromo (para el body de la nota).
+  if (variant === 'free') return <EditorContent editor={editor} />
 
   return (
     <div className="notes-editor">

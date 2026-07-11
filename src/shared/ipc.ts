@@ -26,6 +26,7 @@ export const IPC = {
   capturePause: 'capture:pause',
   captureResume: 'capture:resume',
   captureState: 'capture:state',
+  captureRename: 'capture:rename',
   meetingsList: 'meetings:list',
   meetingsGet: 'meetings:get',
   meetingsSaveNotes: 'meetings:save-notes',
@@ -56,6 +57,8 @@ export const IPC = {
   evNubExpanded: 'ev:nub-expanded',
   /** La ventana principal debe abrir "Pregúntale a Uyari" (viene del nub). */
   evOpenAsk: 'ev:open-ask',
+  /** Volver a la nota en vivo (el nub trajo la principal al frente). */
+  evRestoreNote: 'ev:restore-note',
 } as const
 
 // Superficie que el preload expone como window.uyari.
@@ -79,6 +82,8 @@ export interface UyariBridge {
     /** Retoma una sesión pausada en un tramo nuevo. */
     resume(): Promise<SessionInfo | null>
     state(): Promise<SessionInfo | null>
+    /** Renombra la sesión en vivo (vacío → "Untitled"). Persiste vía ingest. */
+    rename(title: string): void
   }
   meetings: {
     list(params?: { cursor?: string; limit?: number }): Promise<MeetingListPage>
@@ -137,6 +142,8 @@ export interface UyariBridge {
     onNubExpanded(cb: (expanded: boolean) => void): () => void
     /** El nub pidió abrir "Pregúntale a Uyari" en la ventana principal. */
     onOpenAsk(cb: () => void): () => void
+    /** Volver a la nota en vivo (el nub trajo la principal al frente). */
+    onRestoreNote(cb: () => void): () => void
   }
 }
 

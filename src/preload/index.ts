@@ -30,6 +30,7 @@ const bridge: UyariBridge = {
     pause: () => ipcRenderer.invoke(IPC.capturePause),
     resume: () => ipcRenderer.invoke(IPC.captureResume),
     state: () => ipcRenderer.invoke(IPC.captureState),
+    rename: (title) => ipcRenderer.send(IPC.captureRename, title),
   },
   meetings: {
     list: (params) => ipcRenderer.invoke(IPC.meetingsList, params),
@@ -63,6 +64,7 @@ const bridge: UyariBridge = {
     onMeetingDetected: subscribe<{ label: string }>(IPC.evMeetingDetected),
     onNubExpanded: subscribe<boolean>(IPC.evNubExpanded),
     onOpenAsk: subscribe<void>(IPC.evOpenAsk),
+    onRestoreNote: subscribe<void>(IPC.evRestoreNote),
   },
 }
 

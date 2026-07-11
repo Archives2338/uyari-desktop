@@ -670,6 +670,25 @@ body {
   color: var(--ink-4);
 }
 
+/* Barras de audio de la píldora de captura (NoteScreen NT1-B). */
+@keyframes uyariBar {
+  0%,
+  100% {
+    transform: scaleY(0.5);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+/* Variante 'free' del editor: body de la nota en vivo, sin cromo, a lo ancho. */
+.notes-editor-content.note-body {
+  padding: 0;
+  min-height: 220px;
+  font-size: 16px;
+  line-height: 1.7;
+}
+
 /* --- Editor rico de notas (Fase 5b, TipTap) --- */
 .notes-editor {
   background: var(--surface);

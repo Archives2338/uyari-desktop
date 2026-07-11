@@ -109,13 +109,14 @@ if (!app.requestSingleInstanceLock()) {
     const isMainWin = (w: BrowserWindow): boolean => w !== overlay && w !== banner
     const focusMainWindow = (): void => {
       const win = BrowserWindow.getAllWindows().find(isMainWin)
-      if (win) {
-        if (win.isMinimized()) win.restore()
-        win.show()
-        win.focus()
-      } else {
-        spawnMainWindow()
-      }
+      const target = win ?? spawnMainWindow()
+      if (target.isMinimized()) target.restore()
+      target.show()
+      target.focus()
+      // Traer la principal al frente (típicamente desde el nub) = volver a la
+      // nota: le avisamos al renderer que salga del estado minimizado.
+      if (win) target.webContents.send(IPC.evRestoreNote)
+      else target.webContents.once('did-finish-load', () => target.webContents.send(IPC.evRestoreNote))
     }
 
     // El "Pregúntale a Uyari" del nub no responde inline (sin espacio para

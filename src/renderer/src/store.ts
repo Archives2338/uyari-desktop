@@ -15,6 +15,9 @@ interface AppStore {
   openMeetingId: string | null
   /** "Pregúntale a Uyari" (chat global) está abierto. */
   askOpen: boolean
+  /** La nota en vivo está minimizada al Home (la sesión sigue; el nub queda
+   *  como reingreso). Solo aplica con sesión activa. */
+  noteMinimized: boolean
 
   refreshAuth(): Promise<void>
   refreshPermissions(): Promise<void>
@@ -30,6 +33,10 @@ interface AppStore {
   closeMeeting(): void
   openAsk(): void
   closeAsk(): void
+  /** Minimiza la nota en vivo al Home (la grabación sigue; aparece el nub). */
+  minimizeNote(): void
+  /** Vuelve a la nota en vivo desde el Home. */
+  restoreNote(): void
 }
 
 export const useApp = create<AppStore>((set, get) => ({
@@ -40,6 +47,7 @@ export const useApp = create<AppStore>((set, get) => ({
   detectedMeeting: null,
   openMeetingId: null,
   askOpen: false,
+  noteMinimized: false,
 
   refreshAuth: async () => set({ auth: await window.uyari.auth.state() }),
   refreshPermissions: async () => set({ permissions: await window.uyari.permissions.status() }),
@@ -48,7 +56,7 @@ export const useApp = create<AppStore>((set, get) => ({
 
   startCapture: async (title) => {
     const session = await window.uyari.capture.start(title)
-    set({ session, captions: [], detectedMeeting: null })
+    set({ session, captions: [], detectedMeeting: null, noteMinimized: false })
   },
 
   stopCapture: async () => {
@@ -59,7 +67,7 @@ export const useApp = create<AppStore>((set, get) => ({
     // vieja pegado en la vista en vivo.
     const clientSessionId = get().session?.clientSessionId
     await window.uyari.capture.stop()
-    set({ session: null, captions: [], openMeetingId: clientSessionId ?? null })
+    set({ session: null, captions: [], openMeetingId: clientSessionId ?? null, noteMinimized: false })
   },
 
   // Pausa/resume: el main empuja el nuevo estado por onSession, así que aquí
@@ -98,4 +106,10 @@ export const useApp = create<AppStore>((set, get) => ({
   closeMeeting: () => set({ openMeetingId: null }),
   openAsk: () => set({ openMeetingId: null, askOpen: true }),
   closeAsk: () => set({ askOpen: false }),
+
+  // Minimizar/restaurar la nota en vivo (solo estado de UI). En el Home la
+  // RecordingPill hace de indicador+reingreso; el nub flotante del borde sigue
+  // su regla normal (aparece solo con la app en segundo plano).
+  minimizeNote: () => set({ noteMinimized: true }),
+  restoreNote: () => set({ noteMinimized: false }),
 }))

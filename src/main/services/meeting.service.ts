@@ -56,6 +56,21 @@ export class MeetingService {
     this.platformHint = platform
   }
 
+  /**
+   * Renombra la sesión en vivo. El `session` del main es la fuente de verdad
+   * del título que el ingest sube (upsert) — actualizarlo aquí evita que el
+   * próximo flush pise el rename. `onSession` refleja el cambio en la UI (nub,
+   * píldora). Persiste también directo (best-effort): tolera 404 si la reunión
+   * aún no existe — el primer ingest la creará con este mismo título.
+   */
+  renameSession(title: string): void {
+    if (!this.session) return
+    const clean = title.trim() || 'Untitled'
+    this.session = { ...this.session, title: clean }
+    this.listener?.onSession(this.session)
+    void this.api.saveTitle(this.session.clientSessionId, clean).catch(() => {})
+  }
+
   state(): SessionInfo | null {
     return this.session
   }
@@ -101,7 +116,9 @@ export class MeetingService {
     this.streamedSecondsClosed = 0
     this.session = {
       clientSessionId: randomUUID(),
-      title: title ?? `Meeting ${new Date().toLocaleString()}`,
+      // Default "Untitled" (patrón Granola): la nota en vivo lo muestra como
+      // placeholder gris hasta que el usuario la renombra (ver NoteScreen).
+      title: title ?? 'Untitled',
       platform: this.platformHint,
       startedAtMs: Date.now(),
       // 'recording' llega después, cuando el engine confirma mic real (ver

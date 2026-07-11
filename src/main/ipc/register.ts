@@ -14,7 +14,11 @@ interface Services {
   api: ApiClient
   meetings: MeetingService
   /** Gestión de ventana del nub flotante — sin lógica de negocio. */
-  overlay: { drag(action: 'start' | 'end'): void; focusMain(): void; openAsk(): void }
+  overlay: {
+    drag(action: 'start' | 'end'): void
+    focusMain(): void
+    openAsk(): void
+  }
 }
 
 export function registerIpc({ settings, api, meetings, overlay }: Services): void {
@@ -41,6 +45,7 @@ export function registerIpc({ settings, api, meetings, overlay }: Services): voi
   ipcMain.handle(IPC.capturePause, () => meetings.pause())
   ipcMain.handle(IPC.captureResume, () => meetings.resume())
   ipcMain.handle(IPC.captureState, () => meetings.state())
+  ipcMain.on(IPC.captureRename, (_e, title: string) => meetings.renameSession(title))
 
   ipcMain.handle(IPC.meetingsList, (_e, params?: { cursor?: string; limit?: number }) =>
     api.listMeetings(params),
@@ -48,6 +53,17 @@ export function registerIpc({ settings, api, meetings, overlay }: Services): voi
   ipcMain.handle(IPC.meetingsGet, (_e, clientSessionId: string) => api.getMeeting(clientSessionId))
   ipcMain.handle(IPC.meetingsSaveNotes, (_e, clientSessionId: string, userNotes: string) =>
     api.saveNotes(clientSessionId, userNotes),
+  )
+  ipcMain.handle(IPC.meetingsSaveTitle, (_e, clientSessionId: string, title: string) =>
+    api.saveTitle(clientSessionId, title),
+  )
+  ipcMain.handle(IPC.meetingsSaveSummary, (_e, clientSessionId: string, content: string) =>
+    api.saveSummary(clientSessionId, content),
+  )
+  ipcMain.handle(
+    IPC.meetingsRegenerateSummary,
+    (_e, clientSessionId: string, template?: string) =>
+      api.regenerateSummary(clientSessionId, template),
   )
   ipcMain.handle(IPC.meetingsAsk, (_e, clientSessionId: string, question: string) =>
     api.ask(clientSessionId, question),

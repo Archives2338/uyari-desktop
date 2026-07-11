@@ -30,12 +30,19 @@ const bridge: UyariBridge = {
     pause: () => ipcRenderer.invoke(IPC.capturePause),
     resume: () => ipcRenderer.invoke(IPC.captureResume),
     state: () => ipcRenderer.invoke(IPC.captureState),
+    rename: (title) => ipcRenderer.send(IPC.captureRename, title),
   },
   meetings: {
     list: (params) => ipcRenderer.invoke(IPC.meetingsList, params),
     get: (clientSessionId) => ipcRenderer.invoke(IPC.meetingsGet, clientSessionId),
     saveNotes: (clientSessionId, userNotes) =>
       ipcRenderer.invoke(IPC.meetingsSaveNotes, clientSessionId, userNotes),
+    saveTitle: (clientSessionId, title) =>
+      ipcRenderer.invoke(IPC.meetingsSaveTitle, clientSessionId, title),
+    saveSummary: (clientSessionId, content) =>
+      ipcRenderer.invoke(IPC.meetingsSaveSummary, clientSessionId, content),
+    regenerateSummary: (clientSessionId, template) =>
+      ipcRenderer.invoke(IPC.meetingsRegenerateSummary, clientSessionId, template),
     ask: (clientSessionId, question) =>
       ipcRenderer.invoke(IPC.meetingsAsk, clientSessionId, question),
     askAll: (question, meetingIds, history) =>
@@ -63,6 +70,7 @@ const bridge: UyariBridge = {
     onMeetingDetected: subscribe<{ label: string }>(IPC.evMeetingDetected),
     onNubExpanded: subscribe<boolean>(IPC.evNubExpanded),
     onOpenAsk: subscribe<void>(IPC.evOpenAsk),
+    onRestoreNote: subscribe<void>(IPC.evRestoreNote),
   },
 }
 

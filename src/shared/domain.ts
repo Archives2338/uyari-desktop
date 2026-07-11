@@ -61,7 +61,11 @@ export type SummaryStatus = 'PENDING' | 'PROCESSING' | 'DONE' | 'FAILED'
 
 export interface MeetingSummary {
   status: SummaryStatus
+  /** content = versión editable; originalContent = versión IA (para Restore). */
   content?: string | null
+  originalContent?: string | null
+  /** Slug de la plantilla que lo generó. */
+  template?: string | null
   actionItems?: string[] | null
   error?: string | null
 }

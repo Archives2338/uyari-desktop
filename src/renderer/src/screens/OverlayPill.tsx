@@ -92,7 +92,14 @@ export function OverlayPill(): React.JSX.Element {
       <div className={expanded ? 'nub-popover nub-popover-open' : 'nub-popover'}>
         <div className="nub-popover-header">
           <span className={dim ? 'nub-dot nub-dot-amber' : 'nub-dot'} />
-          <span className="nub-title">{session.title}</span>
+          <span
+            className="nub-title"
+            title="Volver a la nota"
+            style={{ cursor: 'pointer' }}
+            onClick={() => window.uyari.overlay.focusMain()}
+          >
+            {session.title || 'Untitled'}
+          </span>
           <span className="nub-time">{formatElapsed(session.startedAtMs)}</span>
           <button
             className="nub-pause"

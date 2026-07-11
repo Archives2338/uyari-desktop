@@ -12,6 +12,8 @@ export interface CaptionGroup {
   key: string
   speaker?: string
   texts: string[]
+  /** Offset del primer segmento del bloque (para timestamps, p.ej. el dock). */
+  tsOffsetMs: number
 }
 
 export function groupCaptions(captions: CaptionSegment[]): CaptionGroup[] {
@@ -31,7 +33,12 @@ export function groupCaptions(captions: CaptionSegment[]): CaptionGroup[] {
       prev.texts.push(c.text)
       lastChars += c.text.length
     } else {
-      groups.push({ key: c.providerMessageId, speaker: c.speaker, texts: [c.text] })
+      groups.push({
+        key: c.providerMessageId,
+        speaker: c.speaker,
+        texts: [c.text],
+        tsOffsetMs: c.tsOffsetMs,
+      })
       lastChars = c.text.length
     }
     lastOffset = c.tsOffsetMs

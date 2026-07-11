@@ -5,8 +5,9 @@ import { ThemeRoot } from '@renderer/theme/theme'
 import { OnboardingFlow } from '@renderer/onboarding/Flow'
 import { loadFlow } from '@renderer/onboarding/state'
 import { Home } from '@renderer/screens/Home'
-import { MeetingDetail } from '@renderer/screens/MeetingDetail'
 import { AskUyari } from '@renderer/screens/AskUyari'
+import { NoteScreen } from '@renderer/screens/note/NoteScreen'
+import { RecordingPill } from '@renderer/components/RecordingPill'
 import { OverlayPill } from '@renderer/screens/OverlayPill'
 import { DetectionBanner } from '@renderer/screens/DetectionBanner'
 
@@ -49,6 +50,9 @@ function MainApp(): React.JSX.Element {
     openMeetingId,
     askOpen,
     openAsk,
+    session,
+    noteMinimized,
+    restoreNote,
   } = useApp()
   const [ready, setReady] = useState(false)
   const [onboarded, setOnboarded] = useState(() => !FORCE_ONBOARDING && loadFlow().done)
@@ -61,6 +65,7 @@ function MainApp(): React.JSX.Element {
       setDetectedMeeting(label),
     )
     const offOpenAsk = window.uyari.events.onOpenAsk(openAsk)
+    const offRestoreNote = window.uyari.events.onRestoreNote(restoreNote)
     const offMic = window.uyari.events.onMicControl((cmd) => {
       window.uyari.mic.log(`control recibido: ${cmd.action}`)
       if (cmd.action === 'start') {
@@ -83,16 +88,28 @@ function MainApp(): React.JSX.Element {
       offMic()
       offDetected()
       offOpenAsk()
+      offRestoreNote()
       window.removeEventListener('online', notifyOnline)
       window.removeEventListener('offline', notifyOffline)
     }
-  }, [refreshAuth, refreshPermissions, pushCaption, setSession, setDetectedMeeting, openAsk])
+  }, [
+    refreshAuth,
+    refreshPermissions,
+    pushCaption,
+    setSession,
+    setDetectedMeeting,
+    openAsk,
+    restoreNote,
+  ])
 
   const showOnboarding = !auth.loggedIn || !onboarded
 
   return (
     <ThemeRoot>
       <div className="drag-region" />
+      {/* Nota minimizada: píldora de grabación al centro-arriba del dashboard
+          (patrón Granola), como indicador + reingreso dentro de la app. */}
+      {ready && !showOnboarding && session && noteMinimized && <RecordingPill />}
       {!ready ? (
         <div style={{ height: '100%' }} />
       ) : showOnboarding ? (
@@ -104,9 +121,14 @@ function MainApp(): React.JSX.Element {
           />
         </div>
       ) : openMeetingId ? (
-        <MeetingDetail key={openMeetingId} clientSessionId={openMeetingId} />
+        // Reunión terminada → la MISMA pantalla de nota, en modo pasado
+        // (documento único de Granola): notas + tab "Notas de Uyari".
+        <NoteScreen key={openMeetingId} pastId={openMeetingId} />
       ) : askOpen ? (
         <AskUyari />
+      ) : session && !noteMinimized ? (
+        // Sesión activa → nota en vivo. Minimizada: Home + RecordingPill.
+        <NoteScreen key="live" />
       ) : (
         <Home />
       )}

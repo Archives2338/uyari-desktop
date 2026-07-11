@@ -26,9 +26,13 @@ export const IPC = {
   capturePause: 'capture:pause',
   captureResume: 'capture:resume',
   captureState: 'capture:state',
+  captureRename: 'capture:rename',
   meetingsList: 'meetings:list',
   meetingsGet: 'meetings:get',
   meetingsSaveNotes: 'meetings:save-notes',
+  meetingsSaveTitle: 'meetings:save-title',
+  meetingsSaveSummary: 'meetings:save-summary',
+  meetingsRegenerateSummary: 'meetings:regenerate-summary',
   meetingsAsk: 'meetings:ask',
   /** "Pregúntale a Uyari" global — contra el historial, con citas. */
   meetingsAskAll: 'meetings:ask-all',
@@ -56,6 +60,8 @@ export const IPC = {
   evNubExpanded: 'ev:nub-expanded',
   /** La ventana principal debe abrir "Pregúntale a Uyari" (viene del nub). */
   evOpenAsk: 'ev:open-ask',
+  /** Volver a la nota en vivo (el nub trajo la principal al frente). */
+  evRestoreNote: 'ev:restore-note',
 } as const
 
 // Superficie que el preload expone como window.uyari.
@@ -79,12 +85,20 @@ export interface UyariBridge {
     /** Retoma una sesión pausada en un tramo nuevo. */
     resume(): Promise<SessionInfo | null>
     state(): Promise<SessionInfo | null>
+    /** Renombra la sesión en vivo (vacío → "Untitled"). Persiste vía ingest. */
+    rename(title: string): void
   }
   meetings: {
     list(params?: { cursor?: string; limit?: number }): Promise<MeetingListPage>
     get(clientSessionId: string): Promise<MeetingDetailData>
     /** Guarda las notas editables del usuario (el scratchpad, Fase 5a). */
     saveNotes(clientSessionId: string, userNotes: string): Promise<{ ok: boolean }>
+    /** Renombra una reunión pasada (título editable en modo pasado). */
+    saveTitle(clientSessionId: string, title: string): Promise<{ ok: boolean }>
+    /** Guarda el content editado del panel Enhanced Notes (Fase 5c). */
+    saveSummary(clientSessionId: string, content: string): Promise<{ ok: boolean }>
+    /** Genera/regenera/reintenta el resumen, con plantilla opcional. */
+    regenerateSummary(clientSessionId: string, template?: string): Promise<{ ok: boolean }>
     ask(clientSessionId: string, question: string): Promise<{ answer: string }>
     /** Chat global: pregunta contra el historial, con citas trazables.
      *  `meetingIds` acota el alcance; sin acotar usa las más recientes.
@@ -137,6 +151,8 @@ export interface UyariBridge {
     onNubExpanded(cb: (expanded: boolean) => void): () => void
     /** El nub pidió abrir "Pregúntale a Uyari" en la ventana principal. */
     onOpenAsk(cb: () => void): () => void
+    /** Volver a la nota en vivo (el nub trajo la principal al frente). */
+    onRestoreNote(cb: () => void): () => void
   }
 }
 

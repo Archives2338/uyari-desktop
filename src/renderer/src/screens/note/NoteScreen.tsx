@@ -291,17 +291,11 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
             </span>
           </div>
 
-          {/* cuerpo: Mis notas (editor) o Notas de Uyari (panel, solo tras generar) */}
-          {showAi && noteTab === 'uyari' ? (
-            <div style={{ flex: 1, minHeight: 220, display: 'flex', flexDirection: 'column' }}>
-              <EnhancedPanel
-                summary={summary}
-                hasUserNotes={!!(past?.userNotes && past.userNotes.trim())}
-                onRegenerate={regenerateSummary}
-              />
-            </div>
-          ) : (
-            <div style={{ flex: 1, minHeight: 220 }}>
+          {/* cuerpo: ambos editores MONTADOS a la vez; se alterna con `display`
+              (no se re-montan al cambiar de tab → sin parpadeo, y cada editor
+              conserva su estado). "Notas de Uyari" solo existe tras generar. */}
+          <div style={{ flex: 1, minHeight: 220, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ flex: 1, minHeight: 220, display: showAi && noteTab === 'uyari' ? 'none' : 'block' }}>
               <NotesEditor
                 variant="free"
                 placeholder={BODY_PLACEHOLDER}
@@ -314,7 +308,19 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
                 }}
               />
             </div>
-          )}
+            {showAi && (
+              <div style={{ flex: 1, minHeight: 220, display: noteTab === 'uyari' ? 'flex' : 'none', flexDirection: 'column' }}>
+                <EnhancedPanel
+                  summary={summary}
+                  hasUserNotes={!!(past?.userNotes && past.userNotes.trim())}
+                  onRegenerate={regenerateSummary}
+                  onSaveContent={(c) =>
+                    void window.uyari.meetings.saveSummary(clientSessionId, c).catch(() => {})
+                  }
+                />
+              </div>
+            )}
+          </div>
         </div>
 
         {/* consent + píldoras */}

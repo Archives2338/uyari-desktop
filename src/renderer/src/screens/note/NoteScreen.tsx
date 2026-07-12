@@ -43,6 +43,9 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
 
   const clientSessionId = pastId ?? session?.clientSessionId ?? ''
   const paused = session?.status === 'paused'
+  // ¿Hay una sesión de captura activa que pertenece a ESTA nota? (nota nueva en
+  // vivo, o una nota pasada REANUDADA). Reanudar no cambia de vista: seguís acá.
+  const capturing = !!session && session.clientSessionId === clientSessionId
 
   // --- Carga de la reunión pasada (con polling mientras el resumen genera) ---
   const [past, setPast] = useState<MeetingDetailData | null>(null)
@@ -156,15 +159,19 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
       : 0
     : (session?.startedAtMs ?? 0)
   const dockSource: CaptionSegment[] = useMemo(() => {
-    if (isPast)
-      return (past?.segments ?? []).map((s) => ({
-        providerMessageId: s.providerMessageId,
-        speaker: s.speaker ?? undefined,
-        text: s.text,
-        tsOffsetMs: s.tsOffsetMs,
-      }))
-    return captions
-  }, [isPast, past?.segments, captions])
+    if (!isPast) return captions
+    const pastSegs = (past?.segments ?? []).map((s) => ({
+      providerMessageId: s.providerMessageId,
+      speaker: s.speaker ?? undefined,
+      text: s.text,
+      tsOffsetMs: s.tsOffsetMs,
+    }))
+    // Nota pasada REANUDADA: el transcript viejo (cargado) + los captions nuevos
+    // en vivo, ordenados por offset (los nuevos ya arrancan después). Así el
+    // transcript se actualiza en vivo SIN cambiar de vista (Granola).
+    if (!capturing) return pastSegs
+    return [...pastSegs, ...captions].sort((a, b) => a.tsOffsetMs - b.tsOffsetMs)
+  }, [isPast, past?.segments, captions, capturing])
   const lines = useMemo<DockLine[]>(
     () =>
       groupCaptions(dockSource).map((g) => ({
@@ -183,8 +190,16 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
   })
 
   // --- Regenerar / generar el resumen (pasado) ---
-  const regenerateSummary = (template?: string): void => {
+  // El transcript quedó "desactualizado" respecto del resumen (reanudaste y
+  // creció). Muestra el toast "Transcript actualizado → Regenerar" (Granola).
+  const [transcriptStale, setTranscriptStale] = useState(false)
+  // Confirmación antes de regenerar sobre un resumen ya hecho (Granola:
+  // "reemplazará las notas, no se puede deshacer"). null = sin diálogo.
+  const [pendingRegen, setPendingRegen] = useState<{ template?: string } | null>(null)
+
+  const doRegenerate = (template?: string): void => {
     if (!clientSessionId) return
+    setTranscriptStale(false)
     // Optimista: mostrar "generando" ya y re-poll.
     setPast((p) => (p ? { ...p, summary: { ...(p.summary ?? { status: 'PENDING' }), status: 'PROCESSING' } } : p))
     setNoteTab('uyari')
@@ -193,6 +208,26 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
       .then(() => setReloadTick((t) => t + 1))
       .catch(() => setReloadTick((t) => t + 1))
   }
+  // Gate: Granola muestra el diálogo específicamente cuando EDITaste el panel
+  // (content ≠ originalContent) — regenerar pisaría tus ediciones. Si no las
+  // tocaste (o es la primera generación), corre directo (no hay nada que perder).
+  const requestRegenerate = (template?: string): void => {
+    const s = past?.summary
+    const edited = !!s && s.status === 'DONE' && s.originalContent != null && (s.content ?? '') !== s.originalContent
+    if (edited) setPendingRegen({ template })
+    else doRegenerate(template)
+  }
+
+  // Al terminar una reanudación (la sesión de esta nota pasa a null), recargar
+  // el transcript combinado; y si había un resumen, marcarlo desactualizado.
+  const wasCapturing = useRef(false)
+  useEffect(() => {
+    if (wasCapturing.current && !capturing && isPast) {
+      setReloadTick((t) => t + 1)
+      if (summaryStatus(past?.summary ?? null) === 'done') setTranscriptStale(true)
+    }
+    wasCapturing.current = capturing
+  }, [capturing, isPast, past?.summary])
 
   // Reanudar una nota terminada: retoma la captura sobre el MISMO
   // clientSessionId, arrancando el tramo nuevo justo después de lo ya
@@ -211,7 +246,13 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
     })
   }
 
-  const back = (): void => (isPast ? closeMeeting() : minimizeNote())
+  const back = (): void => {
+    // Capturando (nota nueva o reanudada) → minimizar al Home + RecordingPill
+    // (la captura sigue; restaurar reabre ESTA nota). Nota pasada quieta → Home.
+    if (capturing) minimizeNote()
+    else if (isPast) closeMeeting()
+    else minimizeNote()
+  }
   const summary = past?.summary ?? null
   // 'empty' = terminada pero sin generar aún → NO hay tabs ni panel, solo la
   // nota + el botón "Generar notas" abajo (patrón Granola). Los tabs y el panel
@@ -331,7 +372,7 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
                 <EnhancedPanel
                   summary={summary}
                   hasUserNotes={!!(past?.userNotes && past.userNotes.trim())}
-                  onRegenerate={regenerateSummary}
+                  onRegenerate={requestRegenerate}
                   onSaveContent={(c) =>
                     void window.uyari.meetings.saveSummary(clientSessionId, c).catch(() => {})
                   }
@@ -349,10 +390,11 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
             </span>
           )}
 
-          {/* Terminada pero sin generar → botón verde "Generar notas" (Granola) */}
-          {isPast && aiStatus === 'empty' && (
+          {/* Terminada pero sin generar → botón verde "Generar notas" (Granola).
+              Primera generación: sin confirmación (no hay nada que reemplazar). */}
+          {isPast && aiStatus === 'empty' && !capturing && (
             <span
-              onClick={() => regenerateSummary()}
+              onClick={() => doRegenerate()}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -404,10 +446,34 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
             </div>
           )}
 
+          {/* Toast "Transcript actualizado → Regenerar notas" (Granola): el
+              transcript creció tras reanudar y el resumen quedó viejo. No
+              auto-regenera; invita. */}
+          {transcriptStale && !capturing && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-pill)', padding: '8px 10px 8px 16px', boxShadow: 'var(--shadow-card)', animation: 'uyariReveal 0.3s var(--ease-out) both' }}>
+              <span
+                onClick={() => setTranscriptStale(false)}
+                title="Descartar"
+                style={{ display: 'inline-flex', cursor: 'pointer', color: 'var(--ink-3)' }}
+              >
+                {dIcon('M18 6 6 18M6 6l12 12', 1.8, 15)}
+              </span>
+              <span style={{ font: 'var(--text-sm)', fontSize: 13, color: 'var(--ink-2)' }}>Transcript actualizado</span>
+              <span
+                onClick={() => requestRegenerate()}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, font: 'var(--label-sm)', fontSize: 12.5, color: 'var(--ink)', background: 'var(--sidebar, var(--surface-sunken))', border: '1px solid var(--border)', borderRadius: 'var(--radius-pill)', padding: '7px 13px', cursor: 'pointer' }}
+              >
+                {aiStar(13)}
+                Regenerar notas
+              </span>
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            {/* Reanudar — solo en pasado: retoma la transcripción sobre la
-                misma nota (Granola nunca "termina" del todo una reunión) */}
-            {isPast && (
+            {/* Reanudar — nota pasada y SIN captura activa: retoma sobre la
+                misma nota sin cambiar de vista. Mientras captura, la reemplaza
+                la píldora de captura (con Detener). */}
+            {isPast && !capturing && (
               <div
                 onClick={onResume}
                 title="Reanudar la transcripción de esta nota"
@@ -417,8 +483,9 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
                 Reanudar
               </div>
             )}
-            {/* píldora de captura — solo en vivo */}
-            {!isPast && (
+            {/* píldora de captura — cuando hay captura activa de ESTA nota
+                (nota nueva en vivo O nota pasada reanudada) */}
+            {capturing && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-pill)', padding: '11px 15px', boxShadow: 'var(--shadow-card)' }}>
                 {paused ? (
                   <span style={{ font: 'var(--text-xs)', fontWeight: 600, color: 'var(--ink-4)' }}>Pausado</span>
@@ -457,6 +524,45 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
       </div>
 
       <LiveDock lines={lines} pinned={dockPinned} onTogglePin={() => setDockPinned((p) => !p)} />
+
+      {/* Confirmación al regenerar tras EDITAR el panel (Granola): regenerar o
+          aplicar una plantilla pisaría tus ediciones. */}
+      {pendingRegen && (
+        <div
+          onClick={() => setPendingRegen(null)}
+          style={{ position: 'absolute', inset: 0, background: 'rgba(20,18,30,0.32)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 30 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: 420, maxWidth: '86%', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-pop)', padding: '22px 24px 18px' }}
+          >
+            <div style={{ font: 'var(--label-md)', fontSize: 17, color: 'var(--text-heading)', marginBottom: 8 }}>
+              ¿Regenerar notas?
+            </div>
+            <div style={{ font: 'var(--text-sm)', fontSize: 13.5, lineHeight: 1.55, color: 'var(--ink-2)' }}>
+              Editaste estas notas. Regenerar o aplicar una plantilla reemplazará tus ediciones, y esto no se puede deshacer.
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
+              <span
+                onClick={() => setPendingRegen(null)}
+                style={{ font: 'var(--label-sm)', fontSize: 13, color: 'var(--ink-2)', background: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius-pill)', padding: '9px 18px', cursor: 'pointer' }}
+              >
+                Cancelar
+              </span>
+              <span
+                onClick={() => {
+                  const tpl = pendingRegen.template
+                  setPendingRegen(null)
+                  doRegenerate(tpl)
+                }}
+                style={{ font: 'var(--label-sm)', fontSize: 13, color: '#fff', background: '#C4554D', borderRadius: 'var(--radius-pill)', padding: '9px 18px', cursor: 'pointer' }}
+              >
+                Continuar
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {askView === 'pop' && (
         <AskPopover

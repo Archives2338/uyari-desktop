@@ -18,11 +18,26 @@ interface AppStore {
   /** La nota en vivo está minimizada al Home (la sesión sigue; el nub queda
    *  como reingreso). Solo aplica con sesión activa. */
   noteMinimized: boolean
+  /** Si la sesión activa vino de REANUDAR una nota terminada, su clientSessionId.
+   *  Permite quedarse en la vista de la nota (openMeetingId) mientras captura,
+   *  y volver a ella al restaurar desde el nub — en vez de saltar a la vista
+   *  "en vivo" (modelo de documento único de Granola: reanudar no cambia la
+   *  vista). null = sesión nueva desde cero (nota en vivo normal). */
+  resumedId: string | null
 
   refreshAuth(): Promise<void>
   refreshPermissions(): Promise<void>
   login(email: string): Promise<void>
   startCapture(title?: string): Promise<void>
+  /** Reanuda una nota terminada: retoma la captura sobre su mismo
+   *  clientSessionId SIN cambiar de vista (Granola: reanudar es un estado de
+   *  fondo del mismo documento). Mantiene `openMeetingId` → seguís en la nota
+   *  (tabs, panel, transcript); los captions nuevos se mergean al transcript. */
+  resumeMeeting(input: {
+    clientSessionId: string
+    title: string
+    baseOffsetMs: number
+  }): Promise<void>
   stopCapture(): Promise<void>
   pauseCapture(): Promise<void>
   resumeCapture(): Promise<void>
@@ -48,6 +63,7 @@ export const useApp = create<AppStore>((set, get) => ({
   openMeetingId: null,
   askOpen: false,
   noteMinimized: false,
+  resumedId: null,
 
   refreshAuth: async () => set({ auth: await window.uyari.auth.state() }),
   refreshPermissions: async () => set({ permissions: await window.uyari.permissions.status() }),
@@ -56,18 +72,34 @@ export const useApp = create<AppStore>((set, get) => ({
 
   startCapture: async (title) => {
     const session = await window.uyari.capture.start(title)
-    set({ session, captions: [], detectedMeeting: null, noteMinimized: false })
+    // Nota en vivo NUEVA (desde cero): no es una reanudación.
+    set({ session, captions: [], detectedMeeting: null, noteMinimized: false, resumedId: null })
+  },
+
+  resumeMeeting: async ({ clientSessionId, title, baseOffsetMs }) => {
+    const session = await window.uyari.capture.start(title, { clientSessionId, baseOffsetMs })
+    // NO se cambia de vista: openMeetingId se MANTIENE en la nota (Granola:
+    // reanudar es un estado de fondo). captions arranca vacío; el NoteScreen
+    // mergea los captions nuevos con el transcript ya cargado (past.segments).
+    // resumedId marca que esta sesión pertenece a esa nota (para volver a ella
+    // al restaurar desde el nub, en vez de saltar a la vista "en vivo").
+    set({
+      session,
+      captions: [],
+      openMeetingId: clientSessionId,
+      resumedId: clientSessionId,
+      detectedMeeting: null,
+      noteMinimized: false,
+    })
   },
 
   stopCapture: async () => {
-    // Guardar el id antes de limpiar la sesión: al terminar, saltamos
-    // directo al detalle (resumen + action items) — el "momento wow".
-    // captions también se limpia: si no, al volver al Home más tarde
-    // (botón "Home" del detalle) se vería el transcript de la sesión
-    // vieja pegado en la vista en vivo.
+    // Al terminar quedamos EN la nota: openMeetingId = la reunión (misma vista;
+    // si era una reanudación, ya estaba abierta ahí). El NoteScreen recarga el
+    // transcript combinado al ver que la sesión pasó a null.
     const clientSessionId = get().session?.clientSessionId
     await window.uyari.capture.stop()
-    set({ session: null, captions: [], openMeetingId: clientSessionId ?? null, noteMinimized: false })
+    set({ session: null, captions: [], openMeetingId: clientSessionId ?? null, noteMinimized: false, resumedId: null })
   },
 
   // Pausa/resume: el main empuja el nuevo estado por onSession, así que aquí
@@ -110,6 +142,11 @@ export const useApp = create<AppStore>((set, get) => ({
   // Minimizar/restaurar la nota en vivo (solo estado de UI). En el Home la
   // RecordingPill hace de indicador+reingreso; el nub flotante del borde sigue
   // su regla normal (aparece solo con la app en segundo plano).
-  minimizeNote: () => set({ noteMinimized: true }),
-  restoreNote: () => set({ noteMinimized: false }),
+  // Minimizar libera la vista (Home + RecordingPill): se limpia openMeetingId
+  // para que una nota reanudada no quede "pegada" por la precedencia del router.
+  minimizeNote: () => set({ noteMinimized: true, openMeetingId: null }),
+  // Restaurar: si la sesión venía de reanudar una nota, se reabre ESA nota
+  // (openMeetingId = resumedId) — no la vista "en vivo". Sesión nueva → live.
+  restoreNote: () =>
+    set((s) => ({ noteMinimized: false, openMeetingId: s.resumedId ?? s.openMeetingId })),
 }))

@@ -25,7 +25,7 @@ const bridge: UyariBridge = {
     openScreenRecordingSettings: () => ipcRenderer.invoke(IPC.permissionsOpenScreenSettings),
   },
   capture: {
-    start: (title) => ipcRenderer.invoke(IPC.captureStart, title),
+    start: (title, resume) => ipcRenderer.invoke(IPC.captureStart, title, resume),
     stop: () => ipcRenderer.invoke(IPC.captureStop),
     pause: () => ipcRenderer.invoke(IPC.capturePause),
     resume: () => ipcRenderer.invoke(IPC.captureResume),

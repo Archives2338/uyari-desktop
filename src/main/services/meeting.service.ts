@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { powerSaveBlocker } from 'electron'
 import type { CaptionSegment, Platform, SessionInfo } from '@shared/domain'
+import type { ResumeDescriptor } from '@shared/ipc'
 import type { ApiClient } from './api.client'
 import type { CaptureEngine } from './capture'
 import type { TranscriptStore } from './transcript.store'
@@ -93,8 +94,8 @@ export class MeetingService {
     return run
   }
 
-  start(title?: string): Promise<SessionInfo> {
-    return this.serialize(() => this._start(title))
+  start(title?: string, resume?: ResumeDescriptor): Promise<SessionInfo> {
+    return this.serialize(() => this._start(title, resume))
   }
 
   pause(): Promise<SessionInfo | null> {
@@ -109,27 +110,42 @@ export class MeetingService {
     return this.serialize(() => this._stop())
   }
 
-  private async _start(title?: string): Promise<SessionInfo> {
+  private async _start(title?: string, resume?: ResumeDescriptor): Promise<SessionInfo> {
     if (this.session) return this.session
 
-    this.take = 0
+    const baseOffsetMs = resume?.baseOffsetMs ?? 0
+    // Tramo de reanudación: `take` alto y creciente (1000 + segundos ya
+    // transcritos) para que los ids nunca colisionen con los de los tramos
+    // previos (0, 1, 2…). Como baseOffsetMs sube en cada resume, el take
+    // también → tampoco colisionan dos reanudaciones entre sí.
+    this.take = resume ? 1000 + Math.floor(baseOffsetMs / 1000) : 0
     this.streamedSecondsClosed = 0
+    // Al reanudar una nota terminada la reunión YA existe en el backend: los
+    // segmentos nuevos hacen upsert sobre ella y finish() no dará 404.
+    this.ingestedAny = !!resume
     this.session = {
-      clientSessionId: randomUUID(),
+      clientSessionId: resume?.clientSessionId ?? randomUUID(),
       // Default "Untitled" (patrón Granola): la nota en vivo lo muestra como
       // placeholder gris hasta que el usuario la renombra (ver NoteScreen).
       title: title ?? 'Untitled',
       platform: this.platformHint,
-      startedAtMs: Date.now(),
+      // Época retrocedida por lo ya transcrito: así una pausa EN VIVO del tramo
+      // reanudado (que calcula su offset como now − startedAtMs) sigue cayendo
+      // después de lo previo, sin solaparse.
+      startedAtMs: Date.now() - baseOffsetMs,
       // 'recording' llega después, cuando el engine confirma mic real (ver
       // native.engine.ts) — evita que la UI invite a hablar antes de tiempo.
       status: 'starting',
     }
 
     this.store.openSession(this.session)
+    // La reunión reanudada ya existe en backend → marcar la fila local como
+    // ingerida (openSession la crea con 0) para que recoverOrphans la cierre
+    // bien si la app muere durante el tramo nuevo.
+    if (resume) this.store.markIngested(this.session.clientSessionId)
     this.buildEngine()
     try {
-      await this.engine!.start({ take: 0, baseOffsetMs: 0 })
+      await this.engine!.start({ take: this.take, baseOffsetMs })
     } catch (err) {
       return this.failSession(err)
     }

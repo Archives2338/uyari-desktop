@@ -13,6 +13,13 @@ import type {
 // Contrato IPC único entre main ⇄ preload ⇄ renderer.
 // Cualquier canal nuevo se declara aquí; nadie usa strings sueltos.
 
+/** Reanudar una nota terminada: continúa sobre su mismo clientSessionId. */
+export interface ResumeDescriptor {
+  clientSessionId: string
+  /** Offset (ms) del que arranca el tramo nuevo: fin de lo ya transcrito + hueco. */
+  baseOffsetMs: number
+}
+
 export const IPC = {
   // renderer → main (invoke)
   authLogin: 'auth:login',
@@ -78,7 +85,14 @@ export interface UyariBridge {
     openScreenRecordingSettings(): Promise<void>
   }
   capture: {
-    start(title?: string): Promise<SessionInfo>
+    /**
+     * Arranca una sesión nueva o, con `resume`, REANUDA una nota terminada
+     * sobre su MISMO clientSessionId (modelo "el stop es una pausa que nadie
+     * retomó", patrón Granola): los segmentos nuevos hacen upsert sobre la
+     * reunión existente, con un tramo (`take`) alto que no colisiona y un
+     * offset que los ubica después de lo ya transcrito.
+     */
+    start(title?: string, resume?: ResumeDescriptor): Promise<SessionInfo>
     stop(): Promise<{ finished: boolean }>
     /** Pausa la captura sin cerrar la sesión (retomable, sin resumen aún). */
     pause(): Promise<SessionInfo | null>

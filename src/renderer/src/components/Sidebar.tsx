@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { dIcon, useHover } from '@renderer/ui/chrome'
+import { dIcon, fIcon, useHover } from '@renderer/ui/chrome'
 import { S, WS_COLORS } from '@renderer/strings'
 
 // Shell de la app (search, nav, spaces, switcher de workspace) — compartido
@@ -31,13 +31,13 @@ function SideItem({
         marginLeft: indent ? 14 : 0,
         borderRadius: 'var(--radius-sm)',
         cursor: onClick ? 'pointer' : 'default',
-        background: active ? 'var(--surface-sunken)' : hover ? 'var(--violet-wash)' : 'transparent',
+        background: active || hover ? 'var(--surface-sunken)' : 'transparent',
         // 13px (no --text-sm=14px): un toque más compacto, a la par de Granola.
         font: '500 13px/1.5 var(--font-sans)',
         color: active ? 'var(--text-heading)' : 'var(--ink-2)',
       }}
     >
-      <span style={{ display: 'inline-flex', color: active ? 'var(--accent-strong)' : 'var(--ink-3)' }}>
+      <span style={{ display: 'inline-flex', color: 'var(--ink-3)' }}>
         {icon}
       </span>
       {label}
@@ -74,6 +74,7 @@ export function Sidebar({
   const initial = (workspace || 'U').trim().charAt(0).toUpperCase()
   const ws = WS_COLORS.find((c) => c.id === wsColorId) ?? WS_COLORS[0]
   const i = (d: string | string[]): ReactNode => dIcon(d, 1.6)
+  const f = (d: string): ReactNode => fIcon(d, 18)
   return (
     <aside
       style={{
@@ -106,7 +107,9 @@ export function Sidebar({
         <span style={{ marginLeft: 'auto', font: 'var(--text-xs)', color: 'var(--ink-4)' }}>⌘K</span>
       </div>
       <SideItem
-        icon={i('M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5')}
+        icon={f(
+          'M219.31,108.68l-80-80a16,16,0,0,0-22.62,0l-80,80A15.87,15.87,0,0,0,32,120v96a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V160h32v56a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V120A15.87,15.87,0,0,0,219.31,108.68ZM208,208H160V152a8,8,0,0,0-8-8H104a8,8,0,0,0-8,8v56H48V120l80-80,80,80Z',
+        )}
         label={S.home.nav.home}
         active={active === 'home'}
         onClick={onHome}
@@ -124,7 +127,9 @@ export function Sidebar({
         />
       )}
       <SideItem
-        icon={i('M8 12a8 7 0 1 1 4 6.2L7 20l.8-3.4A8 7 0 0 1 8 12z')}
+        icon={f(
+          'M232.07,186.76a80,80,0,0,0-62.5-114.17A80,80,0,1,0,23.93,138.76l-7.27,24.71a16,16,0,0,0,19.87,19.87l24.71-7.27a80.39,80.39,0,0,0,25.18,7.35,80,80,0,0,0,108.34,40.65l24.71,7.27a16,16,0,0,0,19.87-19.86ZM62,159.5a8.28,8.28,0,0,0-2.26.32L32,168l8.17-27.76a8,8,0,0,0-.63-6,64,64,0,1,1,26.26,26.26A8,8,0,0,0,62,159.5Zm153.79,28.73L224,216l-27.76-8.17a8,8,0,0,0-6,.63,64.05,64.05,0,0,1-85.87-24.88A79.93,79.93,0,0,0,174.7,89.71a64,64,0,0,1,41.75,92.48A8,8,0,0,0,215.82,188.23Z',
+        )}
         label={S.home.nav.ask}
         active={active === 'ask'}
         onClick={onAsk}
@@ -179,7 +184,12 @@ export function Sidebar({
           >
             {S.home.spaces}
           </div>
-          <SideItem icon={i(['M5 11h14v10H5z', 'M8 11V7a4 4 0 0 1 8 0v4'])} label={S.home.myNotes} />
+          <SideItem
+            icon={f(
+              'M208,88H48a16,16,0,0,0-16,16v96a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V104A16,16,0,0,0,208,88Zm0,112H48V104H208v96ZM48,64a8,8,0,0,1,8-8H200a8,8,0,0,1,0,16H56A8,8,0,0,1,48,64ZM64,32a8,8,0,0,1,8-8H184a8,8,0,0,1,0,16H72A8,8,0,0,1,64,32Z',
+            )}
+            label={S.home.myNotes}
+          />
           <SideItem
             icon={i([
               'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',

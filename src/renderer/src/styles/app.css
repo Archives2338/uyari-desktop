@@ -15,6 +15,36 @@ body {
   user-select: none;
 }
 
+/* Scrollbars estilo Granola: finos y "fantasma" — el thumb es invisible por
+   defecto y solo aparece traslúcido al pasar el mouse por el área scrolleable
+   (transición suave). Reemplaza los scrollbars pesados del OS. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 8px;
+  /* Borde transparente + clip = thumb "flotante", más fino que el canal. */
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  transition: background-color 0.2s ease;
+}
+/* Aparece al hover del contenedor scrolleable (no solo sobre el thumb). */
+:hover::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+}
+/* Un toque más marcado al pasar por encima del thumb mismo. */
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-strong);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* Barra de arrastre para la ventana sin título (hiddenInset) */
 .drag-region {
   position: fixed;

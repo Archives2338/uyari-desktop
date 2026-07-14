@@ -48,6 +48,10 @@
   --border-strong: #D9D6CC;    /* input borders */
   --surface: #FFFFFF;          /* cards on paper */
   --surface-sunken: #ECEAE3;   /* wells, code, disabled fills, item activo */
+  /* Scrollbar estilo Granola: thumb invisible que aparece traslúcido al hover
+     del área (ver app.css). Oscuro cálido al ~20% en light. */
+  --scrollbar-thumb: rgba(71, 67, 42, 0.20);
+  --scrollbar-thumb-strong: rgba(71, 67, 42, 0.34);
 
   /* ── Semantic aliases ── */
   --text-heading: var(--ink);

@@ -253,6 +253,15 @@ export function dIcon(d: string | string[], strokeWidth = 1.7, size = 20): React
   )
 }
 
+/** Icono de relleno a partir de un path (viewBox 256, estilo Phosphor). */
+export function fIcon(d: string, size = 20): React.JSX.Element {
+  return (
+    <svg width={size} height={size} viewBox="0 0 256 256" fill="currentColor">
+      <path d={d} />
+    </svg>
+  )
+}
+
 /** Hover genérico para filas/ítems que el kit resolvía con useState local. */
 export function useHover(): [boolean, { onMouseEnter: () => void; onMouseLeave: () => void }] {
   const [hover, setHover] = useState(false)

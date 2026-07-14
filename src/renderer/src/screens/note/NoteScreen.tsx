@@ -50,6 +50,17 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
   // --- Carga de la reunión pasada (con polling mientras el resumen genera) ---
   const [past, setPast] = useState<MeetingDetailData | null>(null)
   const [reloadTick, setReloadTick] = useState(0)
+  // Al parar de capturar sin resumen previo, la auto-generación (backend)
+  // puede disparar recién tras SU delay de gracia (~10s) — sin esto, el poll
+  // ve `summary: null`, no tiene nada PENDING/PROCESSING que seguir, y para
+  // antes de que la generación automática siquiera empiece. Presupuesto de
+  // reintentos "a ciegas" para no perdérnosla (ver wasCapturing más abajo).
+  const autoGenPollBudget = useRef(0)
+  // Ventana de decisión de la auto-generación: tras parar, el backend puede
+  // tardar (gracia ~10s + guard LLM) antes de que el resumen pase a PENDING.
+  // Mientras dure, la UI NO muestra el botón verde "Generar notas" (invitaría
+  // a generar algo que ya se está haciendo solo) sino un indicador neutro.
+  const [autoGenPending, setAutoGenPending] = useState(false)
   useEffect(() => {
     if (!pastId) return
     let cancelled = false
@@ -60,7 +71,20 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
         if (cancelled) return
         setPast(data)
         const st = data.summary?.status
-        if (st === 'PENDING' || st === 'PROCESSING') timer = setTimeout(() => void load(), 3000)
+        if (st === 'PENDING' || st === 'PROCESSING') {
+          // El resumen ya arrancó: la ventana de decisión terminó (queued).
+          setAutoGenPending(false)
+          timer = setTimeout(() => void load(), 1500)
+        } else if (st === 'DONE' || st === 'FAILED') {
+          // Resuelto: nada más que sondear, apagar el indicador "Analizando".
+          setAutoGenPending(false)
+        } else if (!st && autoGenPollBudget.current > 0) {
+          autoGenPollBudget.current -= 1
+          // Se agotó el presupuesto sin que apareciera: la auto-gen se saltó
+          // (muy corta / LLM dijo que no terminó) → cae al botón manual.
+          if (autoGenPollBudget.current === 0) setAutoGenPending(false)
+          timer = setTimeout(() => void load(), 1500)
+        }
       } catch {
         // best-effort; el próximo tick reintenta
       }
@@ -219,15 +243,58 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
   }
 
   // Al terminar una reanudación (la sesión de esta nota pasa a null), recargar
-  // el transcript combinado; y si había un resumen, marcarlo desactualizado.
+  // el transcript combinado; y si el resumen ya estaba, marcarlo desactualizado
+  // (creció el transcript → toast "Regenerar"). El disparo del auto-gen NO vive
+  // acá (se perdía en el remonte live→pasada): lo maneja el effect de
+  // justEndedId de abajo, que sobrevive al remonte.
   const wasCapturing = useRef(false)
   useEffect(() => {
     if (wasCapturing.current && !capturing && isPast) {
-      setReloadTick((t) => t + 1)
       if (summaryStatus(past?.summary ?? null) === 'done') setTranscriptStale(true)
+      setReloadTick((t) => t + 1)
     }
     wasCapturing.current = capturing
   }, [capturing, isPast, past?.summary])
+
+  // Nota RECIÉN terminada → arrancar el blind-poll de la auto-generación. Se
+  // dispara por la señal del store (justEndedId), no por la transición
+  // capturing→false, porque al terminar una nota NUEVA el componente se
+  // remonta (App.tsx: key "live" → key openMeetingId) y una instancia recién
+  // montada nunca ve esa transición. La señal en el store sí sobrevive.
+  const justEndedId = useApp((s) => s.justEndedId)
+  const clearJustEnded = useApp((s) => s.clearJustEnded)
+  useEffect(() => {
+    if (justEndedId && justEndedId === clientSessionId) {
+      // Presupuesto SOLO para la fase CIEGA (antes de que el summary pase a
+      // PENDING): gracia ~6s + guard LLM (a veces varios seg) + pickup ~1s.
+      // Apenas aparece PENDING el poll sigue solo. 16×1.5s = 24s de margen.
+      autoGenPollBudget.current = 16
+      setAutoGenPending(true)
+      setReloadTick((t) => t + 1)
+      clearJustEnded()
+    }
+  }, [justEndedId, clientSessionId, clearJustEnded])
+
+  // Push del main con la decisión de la auto-gen: en vez de sondear a ciegas
+  // hasta agotar el presupuesto, reaccionamos al instante. `skipped`/
+  // `no-credits` → cortar el "Analizando…" ya (mostrar el botón manual);
+  // `queued` → forzar un poll ya para agarrar el PENDING sin esperar el tick.
+  useEffect(() => {
+    return window.uyari.events.onAutoGenResult((r) => {
+      if (r.clientSessionId !== clientSessionId) return
+      if (r.outcome === 'queued') {
+        // Se están generando notas solas → mostrar el tab de Uyari cuando
+        // aparezca (igual que el camino manual doRegenerate). El tab recién
+        // se renderiza al existir el resumen, así que dejarlo pre-seleccionado.
+        setNoteTab('uyari')
+        setReloadTick((t) => t + 1)
+      } else {
+        // skipped / no-credits: no viene resumen → cortar la espera ciega.
+        autoGenPollBudget.current = 0
+        setAutoGenPending(false)
+      }
+    })
+  }, [clientSessionId])
 
   // Reanudar una nota terminada: retoma la captura sobre el MISMO
   // clientSessionId, arrancando el tramo nuevo justo después de lo ya
@@ -390,9 +457,41 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
             </span>
           )}
 
-          {/* Terminada pero sin generar → botón verde "Generar notas" (Granola).
-              Primera generación: sin confirmación (no hay nada que reemplazar). */}
-          {isPast && aiStatus === 'empty' && !capturing && (
+          {/* Ventana de decisión de la auto-gen: indicador neutro en vez del
+              botón verde — no invita a generar algo que ya se está evaluando.
+              Transiciona suave a "generando" (queued) o cae al botón (skip). */}
+          {isPast && aiStatus === 'empty' && !capturing && autoGenPending && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 9,
+                font: 'var(--label-sm)',
+                fontSize: 13,
+                color: 'var(--ink-3)',
+                background: 'var(--surface-sunken)',
+                borderRadius: 'var(--radius-pill)',
+                padding: '11px 20px',
+              }}
+            >
+              <span
+                style={{
+                  width: 13,
+                  height: 13,
+                  borderRadius: '50%',
+                  border: '2px solid var(--ink-4)',
+                  borderTopColor: 'transparent',
+                  animation: 'uyariSpin 0.7s linear infinite',
+                }}
+              />
+              Analizando la reunión…
+            </span>
+          )}
+
+          {/* Terminada, sin generar y la auto-gen ya se descartó (o no aplica) →
+              botón verde manual "Generar notas" (Granola). Primera generación:
+              sin confirmación (no hay nada que reemplazar). */}
+          {isPast && aiStatus === 'empty' && !capturing && !autoGenPending && (
             <span
               onClick={() => doRegenerate()}
               style={{

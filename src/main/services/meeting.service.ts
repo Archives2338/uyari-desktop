@@ -13,10 +13,17 @@ import type { TranscriptStore } from './transcript.store'
 
 const FLUSH_INTERVAL_MS = 5_000
 const MAX_BATCH = 500
+// Delay de gracia antes de auto-generar el resumen al stop (patrón Granola:
+// da tiempo a que un "stop" accidental se deshaga con Reanudar antes de
+// gastar el crédito de IA). Las guardas de duración/tamaño viven en el
+// backend (autoGenerateSummary); acá solo se decide CUÁNDO llamarlo.
+const AUTO_GEN_GRACE_MS = 6_000
 
 type Listener = {
   onCaption(segment: CaptionSegment): void
   onSession(session: SessionInfo | null): void
+  /** La auto-generación resolvió (queued/skipped/no-credits) tras la gracia. */
+  onAutoGenResult?(result: { clientSessionId: string; outcome: string; reason?: string }): void
 }
 
 export class MeetingService {
@@ -41,6 +48,10 @@ export class MeetingService {
   // el engine sobrevive las pausas y cuenta de forma acumulada; esto queda
   // como red por si alguna vez se destruye a mitad de sesión).
   private streamedSecondsClosed = 0
+  // Auto-generación pendiente tras un stop (delay de gracia). Se cancela si
+  // el usuario reanuda ESA MISMA nota antes de que dispare (equivalente a
+  // `stop-auto-gen-skipped-resumed` de Granola).
+  private pendingAutoGen: { clientSessionId: string; timer: NodeJS.Timeout } | null = null
 
   constructor(
     private readonly api: ApiClient,
@@ -112,6 +123,13 @@ export class MeetingService {
 
   private async _start(title?: string, resume?: ResumeDescriptor): Promise<SessionInfo> {
     if (this.session) return this.session
+
+    // Reanudar esta nota antes de que dispare la auto-generación la cancela:
+    // el usuario "se arrepintió" del stop, no hay nada que resumir todavía.
+    if (resume && this.pendingAutoGen?.clientSessionId === resume.clientSessionId) {
+      clearTimeout(this.pendingAutoGen.timer)
+      this.pendingAutoGen = null
+    }
 
     const baseOffsetMs = resume?.baseOffsetMs ?? 0
     // Tramo de reanudación: `take` alto y creciente (1000 + segundos ya
@@ -319,6 +337,29 @@ export class MeetingService {
     this.listener?.onSession(this.session)
   }
 
+  /**
+   * Programa la auto-generación tras el delay de gracia. Las guardas de
+   * duración mínima / transcript mínimo viven en el backend
+   * (autoGenerateSummary) — acá solo se decide CUÁNDO intentarlo, y se
+   * cancela si _start() ve un resume de esta misma nota antes de disparar.
+   */
+  private scheduleAutoGenerate(clientSessionId: string): void {
+    if (this.pendingAutoGen) clearTimeout(this.pendingAutoGen.timer)
+    const timer = setTimeout(() => {
+      this.pendingAutoGen = null
+      void this.api
+        .autoGenerateSummary(clientSessionId)
+        .then((result) => {
+          // Push al renderer: deja de sondear a ciegas y reacciona al instante
+          // (skipped → botón manual ya; queued → esperar el resumen).
+          const reason = 'reason' in result ? result.reason : undefined
+          this.listener?.onAutoGenResult?.({ clientSessionId, outcome: result.outcome, reason })
+        })
+        .catch((err) => console.error('[auto-gen]', err))
+    }, AUTO_GEN_GRACE_MS)
+    this.pendingAutoGen = { clientSessionId, timer }
+  }
+
   private async flush(): Promise<void> {
     if (!this.session || this.buffer.size === 0) return
     const batch = [...this.buffer.values()].slice(0, MAX_BATCH)
@@ -345,6 +386,7 @@ export class MeetingService {
 
   private async _stop(): Promise<{ finished: boolean }> {
     if (!this.session) return { finished: false }
+    const clientSessionId = this.session.clientSessionId
     // Cierra el tramo activo (si lo hay — si estaba pausada, el engine ya es
     // null) y acumula sus segundos de STT en streamedSecondsClosed.
     await this.teardownTake()
@@ -360,7 +402,7 @@ export class MeetingService {
     // es quien la crea; sin segmentos ingeridos, /finish daría 404).
     if (this.ingestedAny) {
       try {
-        await this.api.finish(this.session.clientSessionId)
+        await this.api.finish(clientSessionId)
         finished = true
       } catch (err) {
         // El transcript sigue en SQLite; recoverOrphans() lo cerrará en el
@@ -368,7 +410,11 @@ export class MeetingService {
         console.error('[finish]', err)
       }
     }
-    if (finished || !this.ingestedAny) this.store.closeSession(this.session.clientSessionId)
+    if (finished || !this.ingestedAny) this.store.closeSession(clientSessionId)
+    // La reunión quedó cerrada en backend: programar la auto-generación (con
+    // su propio delay de gracia, cancelable si el usuario reanuda ANTES de
+    // que dispare — ver _start()).
+    if (finished) this.scheduleAutoGenerate(clientSessionId)
 
     // Best-effort: medir el consumo de STT del plan. No bloquea el stop ni
     // importa si falla (el gate real está en la emisión del token).

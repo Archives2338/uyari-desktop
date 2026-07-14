@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC, type UyariBridge } from '@shared/ipc'
+import { IPC, type UyariBridge, type AutoGenResult } from '@shared/ipc'
 import type { CaptionSegment, MicControlCmd, SessionInfo } from '@shared/domain'
 
 // Puente único y tipado entre renderer y main. El renderer no ve electron:
@@ -71,6 +71,7 @@ const bridge: UyariBridge = {
     onNubExpanded: subscribe<boolean>(IPC.evNubExpanded),
     onOpenAsk: subscribe<void>(IPC.evOpenAsk),
     onRestoreNote: subscribe<void>(IPC.evRestoreNote),
+    onAutoGenResult: subscribe<AutoGenResult>(IPC.evAutoGenResult),
   },
 }
 

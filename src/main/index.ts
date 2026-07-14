@@ -171,6 +171,7 @@ if (!app.requestSingleInstanceLock()) {
           overlay.close()
         }
       },
+      onAutoGenResult: (result) => broadcast(IPC.evAutoGenResult, result),
     })
 
     // Auto-detección de reunión: si una app de reuniones enciende el mic y

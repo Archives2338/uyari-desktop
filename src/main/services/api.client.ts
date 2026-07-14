@@ -218,6 +218,24 @@ export class ApiClient {
     })
   }
 
+  /**
+   * Generación AUTOMÁTICA (sin acción del usuario): el backend aplica las
+   * guardas de duración/tamaño mínimo y nunca pisa un resumen existente.
+   * La llama MeetingService tras un delay de gracia cancelable si se reanuda.
+   */
+  autoGenerateSummary(
+    clientSessionId: string,
+  ): Promise<
+    | { outcome: 'queued'; meetingId: string }
+    | { outcome: 'skipped'; reason: string }
+    | { outcome: 'no-credits' }
+  > {
+    return this.request(`/meetings/${clientSessionId}/summary/auto-generate`, {
+      method: 'POST',
+      body: '{}',
+    })
+  }
+
   /** Activa (idempotente) el link público y devuelve la URL para compartir. */
   share(clientSessionId: string): Promise<{ url: string }> {
     return this.request(`/meetings/${clientSessionId}/share`, { method: 'POST', body: '{}' })

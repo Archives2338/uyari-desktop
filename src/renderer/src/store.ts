@@ -24,6 +24,12 @@ interface AppStore {
    *  "en vivo" (modelo de documento único de Granola: reanudar no cambia la
    *  vista). null = sesión nueva desde cero (nota en vivo normal). */
   resumedId: string | null
+  /** clientSessionId de la nota que se ACABA de terminar (stop). Señal para
+   *  que el NoteScreen (que se REMONTA al pasar de la vista "live" key="live"
+   *  a la pasada key=openMeetingId) arranque el blind-poll de la auto-
+   *  generación aunque no haya visto la transición capturing→false. Vive en el
+   *  store justamente para sobrevivir ese remonte. Se limpia al consumirlo. */
+  justEndedId: string | null
 
   refreshAuth(): Promise<void>
   refreshPermissions(): Promise<void>
@@ -52,6 +58,8 @@ interface AppStore {
   minimizeNote(): void
   /** Vuelve a la nota en vivo desde el Home. */
   restoreNote(): void
+  /** Limpia justEndedId una vez que el NoteScreen lo consumió. */
+  clearJustEnded(): void
 }
 
 export const useApp = create<AppStore>((set, get) => ({
@@ -64,6 +72,7 @@ export const useApp = create<AppStore>((set, get) => ({
   askOpen: false,
   noteMinimized: false,
   resumedId: null,
+  justEndedId: null,
 
   refreshAuth: async () => set({ auth: await window.uyari.auth.state() }),
   refreshPermissions: async () => set({ permissions: await window.uyari.permissions.status() }),
@@ -99,7 +108,16 @@ export const useApp = create<AppStore>((set, get) => ({
     // transcript combinado al ver que la sesión pasó a null.
     const clientSessionId = get().session?.clientSessionId
     await window.uyari.capture.stop()
-    set({ session: null, captions: [], openMeetingId: clientSessionId ?? null, noteMinimized: false, resumedId: null })
+    // justEndedId: la nota recién terminada arranca el blind-poll del auto-gen
+    // aunque el NoteScreen se remonte (live→pasada) — ver store interface.
+    set({
+      session: null,
+      captions: [],
+      openMeetingId: clientSessionId ?? null,
+      noteMinimized: false,
+      resumedId: null,
+      justEndedId: clientSessionId ?? null,
+    })
   },
 
   // Pausa/resume: el main empuja el nuevo estado por onSession, así que aquí
@@ -149,4 +167,6 @@ export const useApp = create<AppStore>((set, get) => ({
   // (openMeetingId = resumedId) — no la vista "en vivo". Sesión nueva → live.
   restoreNote: () =>
     set((s) => ({ noteMinimized: false, openMeetingId: s.resumedId ?? s.openMeetingId })),
+
+  clearJustEnded: () => set({ justEndedId: null }),
 }))

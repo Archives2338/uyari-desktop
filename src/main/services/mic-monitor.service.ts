@@ -22,25 +22,39 @@ const MEETING_APPS: Record<string, string> = {
 const BROWSERS: Record<string, string> = {
   'com.google.Chrome': 'Chrome',
   'com.apple.Safari': 'Safari',
-  // Safari captura el mic de las webs en el proceso GPU de WebKit, no en el
-  // bundle de Safari.
-  'com.apple.WebKit.GPU': 'Safari',
   'org.mozilla.firefox': 'Firefox',
   'com.microsoft.edgemac': 'Edge',
   'com.brave.Browser': 'Brave',
   'company.thebrowser.Browser': 'Arc',
 }
 
+// Alias EXACTOS que NO se derivan por prefijo — copiados de la tabla real de
+// Granola (jvt en su main, verificada contra el bundle): el audio de FaceTime
+// lo captura el daemon avconferenced, el de Safari el proceso GPU de WebKit,
+// y Zoom tiene procesos satélite con otro bundle.
+const BUNDLE_ALIASES: Record<string, string> = {
+  'us.zoom.ZoomHybridConf': 'us.zoom.xos',
+  'us.zoom.ZoomPhone': 'us.zoom.xos',
+  'com.apple.avconferenced': 'com.apple.FaceTime',
+  'com.apple.WebKit.GPU': 'com.apple.Safari',
+}
+
 /**
- * Resuelve el bundle "dueño" de un proceso de audio. Los navegadores y las
- * apps Electron NO capturan en su proceso principal sino en un helper —
- * Core Audio reporta ESE bundle (visto en vivo: Chrome en Meet aparece como
- * `com.google.Chrome.helper`, no `com.google.Chrome`; ídem Discord/Slack/
- * Teams con sus `.helper`). Matching por prefijo contra los bundles conocidos.
+ * Resuelve el bundle "dueño" de un proceso de audio (patrón Granola: tabla de
+ * alias + catálogo). Los navegadores y las apps Electron NO capturan en su
+ * proceso principal sino en un helper — Core Audio reporta ESE bundle (visto
+ * en vivo: Chrome en Meet aparece como `com.google.Chrome.helper`; Granola
+ * alias también Discord/Slack/Teams/.modulehost). Primero alias exactos, luego
+ * prefijo case-insensitive (cubre variantes como `company.thebrowser.browser.
+ * helper`, con "browser" en minúscula, que Granola alias a mano).
  */
 function ownerBundle(bundleId: string): string {
+  const alias = BUNDLE_ALIASES[bundleId]
+  if (alias) return alias
+  const lower = bundleId.toLowerCase()
   for (const known of [...Object.keys(MEETING_APPS), ...Object.keys(BROWSERS)]) {
-    if (bundleId === known || bundleId.startsWith(known + '.')) return known
+    const knownLower = known.toLowerCase()
+    if (lower === knownLower || lower.startsWith(knownLower + '.')) return known
   }
   return bundleId
 }

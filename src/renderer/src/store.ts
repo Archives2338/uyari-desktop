@@ -15,6 +15,8 @@ interface AppStore {
   openMeetingId: string | null
   /** "Pregúntale a Uyari" (chat global) está abierto. */
   askOpen: boolean
+  /** Modal de Ajustes abierto (overlay global, no compite con openMeetingId/askOpen). */
+  settingsOpen: boolean
   /** La nota en vivo está minimizada al Home (la sesión sigue; el nub queda
    *  como reingreso). Solo aplica con sesión activa. */
   noteMinimized: boolean
@@ -58,6 +60,8 @@ interface AppStore {
   closeMeeting(): void
   openAsk(): void
   closeAsk(): void
+  openSettings(): void
+  closeSettings(): void
   /** Minimiza la nota en vivo al Home (la grabación sigue; aparece el nub). */
   minimizeNote(): void
   /** Vuelve a la nota en vivo desde el Home. */
@@ -80,6 +84,7 @@ export const useApp = create<AppStore>((set, get) => ({
   detectedMeeting: null,
   openMeetingId: null,
   askOpen: false,
+  settingsOpen: false,
   noteMinimized: false,
   resumedId: null,
   justEndedId: null,
@@ -119,16 +124,21 @@ export const useApp = create<AppStore>((set, get) => ({
     // si era una reanudación, ya estaba abierta ahí). El NoteScreen recarga el
     // transcript combinado al ver que la sesión pasó a null.
     const clientSessionId = get().session?.clientSessionId
-    await window.uyari.capture.stop()
+    // finished=false → la sesión terminó ANTES del primer flush (5s) y nunca
+    // se ingirió nada: la reunión NUNCA se creó en el backend. Navegar a
+    // openMeetingId ahí sería abrir una nota fantasma — el NoteScreen quedaría
+    // pollGeando un 404 para siempre (pantalla negra). En ese caso volvemos
+    // al Home, como si la grabación nunca hubiera empezado.
+    const { finished } = await window.uyari.capture.stop()
     // justEndedId: la nota recién terminada arranca el blind-poll del auto-gen
     // aunque el NoteScreen se remonte (live→pasada) — ver store interface.
     set({
       session: null,
       captions: [],
-      openMeetingId: clientSessionId ?? null,
+      openMeetingId: finished ? (clientSessionId ?? null) : null,
       noteMinimized: false,
       resumedId: null,
-      justEndedId: clientSessionId ?? null,
+      justEndedId: finished ? (clientSessionId ?? null) : null,
     })
   },
 
@@ -168,6 +178,10 @@ export const useApp = create<AppStore>((set, get) => ({
   closeMeeting: () => set({ openMeetingId: null }),
   openAsk: () => set({ openMeetingId: null, askOpen: true }),
   closeAsk: () => set({ askOpen: false }),
+  // Overlay global: no toca openMeetingId/askOpen (se puede abrir desde
+  // cualquier pantalla sin perder dónde estabas).
+  openSettings: () => set({ settingsOpen: true }),
+  closeSettings: () => set({ settingsOpen: false }),
 
   // Minimizar/restaurar la nota en vivo (solo estado de UI). En el Home la
   // RecordingPill hace de indicador+reingreso; el nub flotante del borde sigue

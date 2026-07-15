@@ -85,8 +85,23 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
           if (autoGenPollBudget.current === 0) setAutoGenPending(false)
           timer = setTimeout(() => void load(), 1500)
         }
-      } catch {
-        // best-effort; el próximo tick reintenta
+      } catch (err) {
+        if (cancelled) return
+        // 404 = la reunión no existe en el backend (p.ej. se paró la captura
+        // ANTES del primer flush — nunca se ingirió nada, ver stopCapture en
+        // store.ts). No hay nada que cargar NUNCA: sin este bounce, la
+        // pantalla queda negra reintentando un 404 para siempre.
+        // OJO: el error cruza IPC — Electron NO garantiza que propiedades
+        // custom (ApiError.status) sobrevivan la serialización, así que se
+        // lee del mensaje (string plano, siempre llega intacto) con el
+        // formato exacto de ApiError: "MÉTODO /ruta → 404 {...}".
+        const is404 = err instanceof Error && /→ 404\b/.test(err.message)
+        if (is404) {
+          closeMeeting()
+          return
+        }
+        // Otro error (red, backend caído): sí vale la pena reintentar.
+        timer = setTimeout(() => void load(), 3000)
       }
     }
     void load()
@@ -94,7 +109,7 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [pastId, reloadTick])
+  }, [pastId, reloadTick, closeMeeting])
 
   const dataReady = !isPast || !!past
 

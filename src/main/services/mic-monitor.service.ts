@@ -8,35 +8,60 @@ import { helperPath } from './capture/helper-path'
 // --mic-monitor reporta qué apps están usando el micrófono; cuando una app
 // de reuniones lo enciende, avisamos ("¿grabar esta llamada?").
 
+// Catálogo COMPLETO portado del de Granola (tabla Ji de su main, 29 apps,
+// verificada contra el bundle extraído) + los legados que ya teníamos.
 const MEETING_APPS: Record<string, string> = {
   'us.zoom.xos': 'Zoom',
   'com.microsoft.teams2': 'Microsoft Teams',
-  'com.microsoft.teams': 'Microsoft Teams',
+  'com.microsoft.teams': 'Microsoft Teams', // cliente legacy (no está en Granola)
   'com.cisco.webexmeetingsapp': 'Webex',
-  'Cisco-Systems.Spark': 'Webex',
   'com.apple.FaceTime': 'FaceTime',
   'com.tinyspeck.slackmacgap': 'Slack',
   'com.hnc.Discord': 'Discord',
+  'net.whatsapp.WhatsApp': 'WhatsApp',
+  'io.aircall.phone': 'Aircall',
+  'com.tencent.tencentmeeting': 'VooV Meeting',
+  'app.tuple.app': 'Tuple',
+  'com.electron.dialpad': 'Dialpad',
+  'com.electron.uberconference': 'Dialpad Meetings',
+  'com.gather.Gather': 'Gather',
+  'com.gather.GatherV2': 'Gather',
+  'com.clickup.desktop-app': 'ClickUp',
+  'com.larksuite.larkApp': 'Lark',
 }
 
+// Navegadores (reunión web = Meet/Teams/Zoom en pestaña). También del
+// catálogo de Granola: incluye los browsers nuevos (Dia, Comet, Atlas, Zen).
 const BROWSERS: Record<string, string> = {
   'com.google.Chrome': 'Chrome',
+  'com.google.Chrome.beta': 'Chrome Beta',
   'com.apple.Safari': 'Safari',
   'org.mozilla.firefox': 'Firefox',
   'com.microsoft.edgemac': 'Edge',
   'com.brave.Browser': 'Brave',
   'company.thebrowser.Browser': 'Arc',
+  'company.thebrowser.dia': 'Dia',
+  'com.vivaldi.Vivaldi': 'Vivaldi',
+  'com.operasoftware.Opera': 'Opera',
+  'ai.perplexity.comet': 'Comet',
+  'com.openai.atlas': 'ChatGPT Atlas',
+  'app.zen-browser.zen': 'Zen Browser',
 }
 
 // Alias EXACTOS que NO se derivan por prefijo — copiados de la tabla real de
 // Granola (jvt en su main, verificada contra el bundle): el audio de FaceTime
 // lo captura el daemon avconferenced, el de Safari el proceso GPU de WebKit,
-// y Zoom tiene procesos satélite con otro bundle.
+// Zoom tiene procesos satélite con otro bundle, y Webex clásico reporta
+// Cisco-Systems.Spark. Los `.helper`/`.modulehost` de todo lo demás los
+// resuelve el prefijo case-insensitive de ownerBundle (no hace falta
+// enumerarlos como hace Granola).
 const BUNDLE_ALIASES: Record<string, string> = {
   'us.zoom.ZoomHybridConf': 'us.zoom.xos',
   'us.zoom.ZoomPhone': 'us.zoom.xos',
   'com.apple.avconferenced': 'com.apple.FaceTime',
   'com.apple.WebKit.GPU': 'com.apple.Safari',
+  'Cisco-Systems.Spark': 'com.cisco.webexmeetingsapp',
+  'io.aircall.workspace.helper': 'io.aircall.phone',
 }
 
 /**
@@ -48,11 +73,17 @@ const BUNDLE_ALIASES: Record<string, string> = {
  * prefijo case-insensitive (cubre variantes como `company.thebrowser.browser.
  * helper`, con "browser" en minúscula, que Granola alias a mano).
  */
+// Orden por longitud DESC: el prefijo más específico gana (p.ej.
+// com.google.Chrome.beta.helper debe resolver a Chrome Beta, no a Chrome).
+const KNOWN_BUNDLES = [...Object.keys(MEETING_APPS), ...Object.keys(BROWSERS)].sort(
+  (a, b) => b.length - a.length,
+)
+
 function ownerBundle(bundleId: string): string {
   const alias = BUNDLE_ALIASES[bundleId]
   if (alias) return alias
   const lower = bundleId.toLowerCase()
-  for (const known of [...Object.keys(MEETING_APPS), ...Object.keys(BROWSERS)]) {
+  for (const known of KNOWN_BUNDLES) {
     const knownLower = known.toLowerCase()
     if (lower === knownLower || lower.startsWith(knownLower + '.')) return known
   }

@@ -24,6 +24,16 @@ interface AppStore {
    *  "en vivo" (modelo de documento único de Granola: reanudar no cambia la
    *  vista). null = sesión nueva desde cero (nota en vivo normal). */
   resumedId: string | null
+  /** clientSessionId de la nota que se ACABA de terminar (stop). Señal para
+   *  que el NoteScreen (que se REMONTA al pasar de la vista "live" key="live"
+   *  a la pasada key=openMeetingId) arranque el blind-poll de la auto-
+   *  generación aunque no haya visto la transición capturing→false. Vive en el
+   *  store justamente para sobrevivir ese remonte. Se limpia al consumirlo. */
+  justEndedId: string | null
+  /** La transcripción de esta nota se detuvo SOLA (fin de reunión detectado
+   *  por el mic-monitor). El NoteScreen muestra el aviso; se limpia al
+   *  descartarlo o al arrancar otra captura. */
+  autoStoppedId: string | null
 
   refreshAuth(): Promise<void>
   refreshPermissions(): Promise<void>
@@ -52,6 +62,14 @@ interface AppStore {
   minimizeNote(): void
   /** Vuelve a la nota en vivo desde el Home. */
   restoreNote(): void
+  /** Limpia justEndedId una vez que el NoteScreen lo consumió. */
+  clearJustEnded(): void
+  /** El main avisó que la transcripción se detuvo sola (fin de reunión).
+   *  Llega ANTES del session→null: abre la nota terminada (misma transición
+   *  que un stop manual) y marca el aviso para el NoteScreen. */
+  noteAutoStopped(clientSessionId: string): void
+  /** Descarta el aviso de auto-stop. */
+  clearAutoStopped(): void
 }
 
 export const useApp = create<AppStore>((set, get) => ({
@@ -64,6 +82,8 @@ export const useApp = create<AppStore>((set, get) => ({
   askOpen: false,
   noteMinimized: false,
   resumedId: null,
+  justEndedId: null,
+  autoStoppedId: null,
 
   refreshAuth: async () => set({ auth: await window.uyari.auth.state() }),
   refreshPermissions: async () => set({ permissions: await window.uyari.permissions.status() }),
@@ -73,7 +93,7 @@ export const useApp = create<AppStore>((set, get) => ({
   startCapture: async (title) => {
     const session = await window.uyari.capture.start(title)
     // Nota en vivo NUEVA (desde cero): no es una reanudación.
-    set({ session, captions: [], detectedMeeting: null, noteMinimized: false, resumedId: null })
+    set({ session, captions: [], detectedMeeting: null, noteMinimized: false, resumedId: null, autoStoppedId: null })
   },
 
   resumeMeeting: async ({ clientSessionId, title, baseOffsetMs }) => {
@@ -90,6 +110,7 @@ export const useApp = create<AppStore>((set, get) => ({
       resumedId: clientSessionId,
       detectedMeeting: null,
       noteMinimized: false,
+      autoStoppedId: null,
     })
   },
 
@@ -99,7 +120,16 @@ export const useApp = create<AppStore>((set, get) => ({
     // transcript combinado al ver que la sesión pasó a null.
     const clientSessionId = get().session?.clientSessionId
     await window.uyari.capture.stop()
-    set({ session: null, captions: [], openMeetingId: clientSessionId ?? null, noteMinimized: false, resumedId: null })
+    // justEndedId: la nota recién terminada arranca el blind-poll del auto-gen
+    // aunque el NoteScreen se remonte (live→pasada) — ver store interface.
+    set({
+      session: null,
+      captions: [],
+      openMeetingId: clientSessionId ?? null,
+      noteMinimized: false,
+      resumedId: null,
+      justEndedId: clientSessionId ?? null,
+    })
   },
 
   // Pausa/resume: el main empuja el nuevo estado por onSession, así que aquí
@@ -149,4 +179,20 @@ export const useApp = create<AppStore>((set, get) => ({
   // (openMeetingId = resumedId) — no la vista "en vivo". Sesión nueva → live.
   restoreNote: () =>
     set((s) => ({ noteMinimized: false, openMeetingId: s.resumedId ?? s.openMeetingId })),
+
+  clearJustEnded: () => set({ justEndedId: null }),
+
+  // Misma transición que un stop manual (openMeetingId queda en la nota, el
+  // auto-gen arranca vía justEndedId) + el aviso "se detuvo sola". La sesión
+  // en sí pasa a null cuando llegue el evSession(null) del stop del main.
+  noteAutoStopped: (clientSessionId) =>
+    set({
+      captions: [],
+      openMeetingId: clientSessionId,
+      noteMinimized: false,
+      resumedId: null,
+      justEndedId: clientSessionId,
+      autoStoppedId: clientSessionId,
+    }),
+  clearAutoStopped: () => set({ autoStoppedId: null }),
 }))

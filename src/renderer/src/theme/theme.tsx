@@ -28,6 +28,9 @@ export const DESK_DARK: Record<string, string> = {
   '--ink-4': '#6E6D66',
   '--border': '#343430',
   '--border-strong': '#454540',
+  // Scrollbar: blanco traslúcido en dark (Granola #ffffff33), ver app.css.
+  '--scrollbar-thumb': 'rgba(255, 255, 255, 0.20)',
+  '--scrollbar-thumb-strong': 'rgba(255, 255, 255, 0.32)',
   '--text-heading': '#F0EFEA',
   '--text-body': '#C7C6BE',
   '--text-muted': '#A3A29A',

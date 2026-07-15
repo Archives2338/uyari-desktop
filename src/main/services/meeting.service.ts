@@ -13,10 +13,30 @@ import type { TranscriptStore } from './transcript.store'
 
 const FLUSH_INTERVAL_MS = 5_000
 const MAX_BATCH = 500
+// Delay de gracia antes de auto-generar el resumen al stop (patrón Granola:
+// da tiempo a que un "stop" accidental se deshaga con Reanudar antes de
+// gastar el crédito de IA). Las guardas de duración/tamaño viven en el
+// backend (autoGenerateSummary); acá solo se decide CUÁNDO llamarlo.
+const AUTO_GEN_GRACE_MS = 6_000
+// Auto-stop por mic-monitor (patrón Granola z4/`mic-app-ended`): cuando la
+// app de reunión SUELTA el micrófono, la llamada terminó (localmente no se
+// puede estar en una llamada sin que la app tenga el mic — mutearse no lo
+// suelta). Guardas antes de parar solo:
+// - sesión < 3 min → no parar (glitch / reunión que recién empieza).
+// - debounce: esperar unos seg por si la app re-toma el mic (cambio de
+//   dispositivo de audio, reconexión, saltar de una llamada a otra).
+// Overrides de dev (mismo patrón que UYARI_AUTOGEN_*).
+const AUTO_STOP_MIN_SESSION_MS = Number(process.env.UYARI_AUTOSTOP_MIN_MS) || 3 * 60_000
+const AUTO_STOP_DEBOUNCE_MS = Number(process.env.UYARI_AUTOSTOP_DEBOUNCE_MS) || 15_000
 
 type Listener = {
   onCaption(segment: CaptionSegment): void
   onSession(session: SessionInfo | null): void
+  /** La auto-generación resolvió (queued/skipped/no-credits) tras la gracia. */
+  onAutoGenResult?(result: { clientSessionId: string; outcome: string; reason?: string }): void
+  /** La transcripción se va a detener SOLA (fin de reunión por mic-monitor).
+   *  Se emite ANTES del stop para que el renderer abra la nota terminada. */
+  onAutoStopped?(info: { clientSessionId: string }): void
 }
 
 export class MeetingService {
@@ -41,6 +61,14 @@ export class MeetingService {
   // el engine sobrevive las pausas y cuenta de forma acumulada; esto queda
   // como red por si alguna vez se destruye a mitad de sesión).
   private streamedSecondsClosed = 0
+  // Auto-generación pendiente tras un stop (delay de gracia). Se cancela si
+  // el usuario reanuda ESA MISMA nota antes de que dispare (equivalente a
+  // `stop-auto-gen-skipped-resumed` de Granola).
+  private pendingAutoGen: { clientSessionId: string; timer: NodeJS.Timeout } | null = null
+  // Auto-stop pendiente (la app de reunión soltó el mic; debounce corriendo).
+  // Se cancela si la app re-toma el mic, si el usuario para/pausa a mano, o
+  // si la sesión cambió cuando el timer dispara.
+  private pendingAutoStop: { clientSessionId: string; timer: NodeJS.Timeout } | null = null
 
   constructor(
     private readonly api: ApiClient,
@@ -55,6 +83,55 @@ export class MeetingService {
   /** El mic-monitor detectó una app de reunión: recordar su plataforma. */
   setPlatformHint(platform: Platform): void {
     this.platformHint = platform
+  }
+
+  /**
+   * La ÚLTIMA app de reunión soltó el micrófono (fin de llamada, patrón
+   * Granola `mic-app-ended`). Si hay captura activa y la sesión superó el
+   * mínimo, programa el auto-stop con debounce — cancelable si la app
+   * re-toma el mic (noteMeetingAppBack) o si el usuario actúa antes.
+   */
+  noteMeetingAppGone(): void {
+    const s = this.session
+    if (!s) return
+    // Pausada = el usuario ya tomó el control a mano; no decidir por él
+    // (además no está transcribiendo — mismo skip que el z4 de Granola).
+    if (s.status === 'paused') {
+      console.log('[auto-stop] sesión pausada; no se auto-detiene')
+      return
+    }
+    const elapsedMs = Date.now() - s.startedAtMs
+    if (elapsedMs < AUTO_STOP_MIN_SESSION_MS) {
+      console.log(`[auto-stop] sesión de ${Math.round(elapsedMs / 1000)}s < mínimo; se ignora`)
+      return
+    }
+    if (this.pendingAutoStop) clearTimeout(this.pendingAutoStop.timer)
+    const clientSessionId = s.clientSessionId
+    console.log(`[auto-stop] app de reunión soltó el mic → debounce ${AUTO_STOP_DEBOUNCE_MS}ms`)
+    const timer = setTimeout(() => {
+      this.pendingAutoStop = null
+      // Revalidar al disparar: la sesión pudo terminar/cambiar/pausarse.
+      const now = this.session
+      if (!now || now.clientSessionId !== clientSessionId || now.status === 'paused') {
+        console.log('[auto-stop] sesión cambió durante el debounce; cancelado')
+        return
+      }
+      console.log('[auto-stop] fin de reunión confirmado → deteniendo transcripción')
+      // Avisar ANTES del stop: el renderer abre la nota terminada (evita el
+      // salto al Home cuando la sesión pase a null) y muestra el motivo.
+      this.listener?.onAutoStopped?.({ clientSessionId })
+      void this.stop()
+    }, AUTO_STOP_DEBOUNCE_MS)
+    this.pendingAutoStop = { clientSessionId, timer }
+  }
+
+  /** Una app de reunión volvió a tomar el mic: cancelar el auto-stop pendiente
+   *  (cambio de dispositivo, reconexión, o saltó a otra llamada). */
+  noteMeetingAppBack(): void {
+    if (!this.pendingAutoStop) return
+    console.log('[auto-stop] app de reunión re-tomó el mic; auto-stop cancelado')
+    clearTimeout(this.pendingAutoStop.timer)
+    this.pendingAutoStop = null
   }
 
   /**
@@ -113,6 +190,13 @@ export class MeetingService {
   private async _start(title?: string, resume?: ResumeDescriptor): Promise<SessionInfo> {
     if (this.session) return this.session
 
+    // Reanudar esta nota antes de que dispare la auto-generación la cancela:
+    // el usuario "se arrepintió" del stop, no hay nada que resumir todavía.
+    if (resume && this.pendingAutoGen?.clientSessionId === resume.clientSessionId) {
+      clearTimeout(this.pendingAutoGen.timer)
+      this.pendingAutoGen = null
+    }
+
     const baseOffsetMs = resume?.baseOffsetMs ?? 0
     // Tramo de reanudación: `take` alto y creciente (1000 + segundos ya
     // transcritos) para que los ids nunca colisionen con los de los tramos
@@ -162,6 +246,11 @@ export class MeetingService {
    */
   private async _pause(): Promise<SessionInfo | null> {
     if (!this.session || this.session.status === 'paused') return this.session
+    // Pausar a mano cancela el auto-stop pendiente: el usuario tomó el control.
+    if (this.pendingAutoStop) {
+      clearTimeout(this.pendingAutoStop.timer)
+      this.pendingAutoStop = null
+    }
     // Marcar 'paused' ANTES de pausar el engine: cualquier 'idle'/'status'
     // tardío no debe pisar el estado (el guard en el handler lo ignora).
     this.session = { ...this.session, status: 'paused', statusDetail: undefined }
@@ -319,6 +408,29 @@ export class MeetingService {
     this.listener?.onSession(this.session)
   }
 
+  /**
+   * Programa la auto-generación tras el delay de gracia. Las guardas de
+   * duración mínima / transcript mínimo viven en el backend
+   * (autoGenerateSummary) — acá solo se decide CUÁNDO intentarlo, y se
+   * cancela si _start() ve un resume de esta misma nota antes de disparar.
+   */
+  private scheduleAutoGenerate(clientSessionId: string): void {
+    if (this.pendingAutoGen) clearTimeout(this.pendingAutoGen.timer)
+    const timer = setTimeout(() => {
+      this.pendingAutoGen = null
+      void this.api
+        .autoGenerateSummary(clientSessionId)
+        .then((result) => {
+          // Push al renderer: deja de sondear a ciegas y reacciona al instante
+          // (skipped → botón manual ya; queued → esperar el resumen).
+          const reason = 'reason' in result ? result.reason : undefined
+          this.listener?.onAutoGenResult?.({ clientSessionId, outcome: result.outcome, reason })
+        })
+        .catch((err) => console.error('[auto-gen]', err))
+    }, AUTO_GEN_GRACE_MS)
+    this.pendingAutoGen = { clientSessionId, timer }
+  }
+
   private async flush(): Promise<void> {
     if (!this.session || this.buffer.size === 0) return
     const batch = [...this.buffer.values()].slice(0, MAX_BATCH)
@@ -345,6 +457,12 @@ export class MeetingService {
 
   private async _stop(): Promise<{ finished: boolean }> {
     if (!this.session) return { finished: false }
+    // Un stop (manual o automático) invalida cualquier auto-stop pendiente.
+    if (this.pendingAutoStop) {
+      clearTimeout(this.pendingAutoStop.timer)
+      this.pendingAutoStop = null
+    }
+    const clientSessionId = this.session.clientSessionId
     // Cierra el tramo activo (si lo hay — si estaba pausada, el engine ya es
     // null) y acumula sus segundos de STT en streamedSecondsClosed.
     await this.teardownTake()
@@ -360,7 +478,7 @@ export class MeetingService {
     // es quien la crea; sin segmentos ingeridos, /finish daría 404).
     if (this.ingestedAny) {
       try {
-        await this.api.finish(this.session.clientSessionId)
+        await this.api.finish(clientSessionId)
         finished = true
       } catch (err) {
         // El transcript sigue en SQLite; recoverOrphans() lo cerrará en el
@@ -368,7 +486,11 @@ export class MeetingService {
         console.error('[finish]', err)
       }
     }
-    if (finished || !this.ingestedAny) this.store.closeSession(this.session.clientSessionId)
+    if (finished || !this.ingestedAny) this.store.closeSession(clientSessionId)
+    // La reunión quedó cerrada en backend: programar la auto-generación (con
+    // su propio delay de gracia, cancelable si el usuario reanuda ANTES de
+    // que dispare — ver _start()).
+    if (finished) this.scheduleAutoGenerate(clientSessionId)
 
     // Best-effort: medir el consumo de STT del plan. No bloquea el stop ni
     // importa si falla (el gate real está en la emisión del token).

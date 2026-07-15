@@ -20,6 +20,16 @@ export interface ResumeDescriptor {
   baseOffsetMs: number
 }
 
+/** Resultado de la auto-generación (main → renderer): el renderer deja de
+ *  sondear a ciegas y reacciona al instante (queued → esperar el resumen;
+ *  skipped/no-credits → mostrar el botón manual sin esperar). */
+export interface AutoGenResult {
+  clientSessionId: string
+  outcome: 'queued' | 'skipped' | 'no-credits'
+  /** Motivo del skip (too-short-duration, too-short-transcript, llm-not-ended…). */
+  reason?: string
+}
+
 export const IPC = {
   // renderer → main (invoke)
   authLogin: 'auth:login',
@@ -69,6 +79,12 @@ export const IPC = {
   evOpenAsk: 'ev:open-ask',
   /** Volver a la nota en vivo (el nub trajo la principal al frente). */
   evRestoreNote: 'ev:restore-note',
+  /** Resultado de la auto-generación (delay de gracia cumplido). */
+  evAutoGenResult: 'ev:auto-gen-result',
+  /** La transcripción se detuvo SOLA (la app de reunión soltó el micrófono).
+   *  Llega ANTES del evSession(null) del stop, para que el renderer abra la
+   *  nota terminada (openMeetingId) en vez de caer al Home. */
+  evAutoStopped: 'ev:auto-stopped',
 } as const
 
 // Superficie que el preload expone como window.uyari.
@@ -167,6 +183,10 @@ export interface UyariBridge {
     onOpenAsk(cb: () => void): () => void
     /** Volver a la nota en vivo (el nub trajo la principal al frente). */
     onRestoreNote(cb: () => void): () => void
+    /** La auto-generación resolvió (queued/skipped/no-credits) tras la gracia. */
+    onAutoGenResult(cb: (result: AutoGenResult) => void): () => void
+    /** La transcripción se detuvo sola (fin de reunión por mic-monitor). */
+    onAutoStopped(cb: (info: { clientSessionId: string }) => void): () => void
   }
 }
 

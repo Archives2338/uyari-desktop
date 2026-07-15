@@ -53,6 +53,7 @@ function MainApp(): React.JSX.Element {
     session,
     noteMinimized,
     restoreNote,
+    noteAutoStopped,
   } = useApp()
   const [ready, setReady] = useState(false)
   const [onboarded, setOnboarded] = useState(() => !FORCE_ONBOARDING && loadFlow().done)
@@ -66,6 +67,12 @@ function MainApp(): React.JSX.Element {
     )
     const offOpenAsk = window.uyari.events.onOpenAsk(openAsk)
     const offRestoreNote = window.uyari.events.onRestoreNote(restoreNote)
+    // Fin de reunión detectado por el mic-monitor: el main detuvo la captura
+    // solo. Abrir la nota terminada ANTES de que llegue el session→null (si
+    // no, el router caería al Home) y mostrar el aviso en la nota.
+    const offAutoStopped = window.uyari.events.onAutoStopped(({ clientSessionId }) =>
+      noteAutoStopped(clientSessionId),
+    )
     const offMic = window.uyari.events.onMicControl((cmd) => {
       window.uyari.mic.log(`control recibido: ${cmd.action}`)
       if (cmd.action === 'start') {
@@ -89,6 +96,7 @@ function MainApp(): React.JSX.Element {
       offDetected()
       offOpenAsk()
       offRestoreNote()
+      offAutoStopped()
       window.removeEventListener('online', notifyOnline)
       window.removeEventListener('offline', notifyOffline)
     }

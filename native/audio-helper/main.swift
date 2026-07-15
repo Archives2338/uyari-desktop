@@ -143,7 +143,10 @@ func runMicMonitor() -> Never {
                 FileHandle.standardOutput.write("\n".data(using: .utf8)!)
             }
         }
-        Thread.sleep(forTimeInterval: 2)
+        // 1 s, paridad con Granola (macos_mic_apps_with_devices: setInterval 1e3).
+        // El poll de Core Audio es barato y acorta a la mitad el peor caso de
+        // detección (banner de inicio y auto-stop de fin).
+        Thread.sleep(forTimeInterval: 1)
     }
 }
 

@@ -1022,40 +1022,6 @@ body {
   color: var(--ink-4);
 }
 
-/* Selector de alcance: <select> real (accesible, funcional) con chrome
-   nativo apagado + chevron propio superpuesto — pill visual, sin perder
-   la interacción nativa (evita reconstruir un dropdown a mano). */
-.ask-scope-wrap {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-.ask-scope-select {
-  appearance: none;
-  -webkit-appearance: none;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  color: var(--ink-2);
-  font: var(--text-xs);
-  font-weight: 500;
-  padding: 7px 22px 7px 12px;
-  cursor: pointer;
-  max-width: 170px;
-  text-overflow: ellipsis;
-}
-
-.ask-scope-chevron {
-  position: absolute;
-  right: 9px;
-  top: 50%;
-  transform: translateY(-50%);
-  pointer-events: none;
-  color: var(--ink-3);
-  font-size: 9px;
-}
 
 .ask-send-btn {
   width: 30px;

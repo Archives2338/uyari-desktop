@@ -68,6 +68,36 @@ export function useSystemDark(): boolean {
   return dark
 }
 
+// --- Override manual del tema (Settings → Apariencia) ---
+// 'system' (default) sigue a prefers-color-scheme; 'light'/'dark' lo fijan.
+// Persistido en localStorage; el cambio se propaga en vivo con un evento
+// propio (localStorage no dispara 'storage' en la misma ventana).
+
+export type ThemePref = 'system' | 'light' | 'dark'
+const THEME_PREF_KEY = 'uyari-theme-pref'
+const THEME_PREF_EVENT = 'uyari-theme-pref-changed'
+
+export function getThemePref(): ThemePref {
+  const raw = localStorage.getItem(THEME_PREF_KEY)
+  return raw === 'light' || raw === 'dark' ? raw : 'system'
+}
+
+export function setThemePref(pref: ThemePref): void {
+  if (pref === 'system') localStorage.removeItem(THEME_PREF_KEY)
+  else localStorage.setItem(THEME_PREF_KEY, pref)
+  window.dispatchEvent(new Event(THEME_PREF_EVENT))
+}
+
+export function useThemePref(): ThemePref {
+  const [pref, setPref] = useState<ThemePref>(getThemePref)
+  useEffect(() => {
+    const onChange = (): void => setPref(getThemePref())
+    window.addEventListener(THEME_PREF_EVENT, onChange)
+    return () => window.removeEventListener(THEME_PREF_EVENT, onChange)
+  }, [])
+  return pref
+}
+
 /** Wrapper raíz: aplica las variables del tema activo y pinta el papel.
  *  `transparent` = para la ventana overlay (pill flotante sin fondo). */
 export function ThemeRoot({
@@ -77,7 +107,9 @@ export function ThemeRoot({
   children: ReactNode
   transparent?: boolean
 }): React.JSX.Element {
-  const dark = useSystemDark()
+  const systemDark = useSystemDark()
+  const pref = useThemePref()
+  const dark = pref === 'system' ? systemDark : pref === 'dark'
   const vars = dark ? DESK_DARK : lightVars(PAPER_DEFAULT)
   return (
     <div

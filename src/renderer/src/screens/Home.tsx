@@ -122,6 +122,7 @@ export function Home(): React.JSX.Element {
     setDetectedMeeting,
     openMeeting,
     openAsk,
+    openSettings,
   } = useApp()
   const bottomRef = useRef<HTMLDivElement>(null)
   const flow = useMemo(loadFlow, [])
@@ -159,7 +160,7 @@ export function Home(): React.JSX.Element {
 
   return (
     <div style={{ flex: 1, display: 'flex', minHeight: 0, height: '100%' }}>
-      <Sidebar workspace={flow.workspace} wsColorId={flow.wsColor} active="home" onAsk={openAsk} />
+      <Sidebar workspace={flow.workspace} wsColorId={flow.wsColor} active="home" onAsk={openAsk} onSettings={openSettings} />
       <main style={{ flex: 1, overflowY: 'auto', position: 'relative', padding: '20px 40px 40px' }}>
         <div style={{ maxWidth: 640, margin: '18px auto 0' }}>
           {detectedMeeting && !session && (

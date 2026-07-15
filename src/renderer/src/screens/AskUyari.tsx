@@ -4,6 +4,7 @@ import { dIcon } from '@renderer/ui/chrome'
 import { S } from '@renderer/strings'
 import { loadFlow } from '@renderer/onboarding/state'
 import { Sidebar } from '@renderer/components/Sidebar'
+import { Dropdown, type DropdownOption } from '@renderer/components/Dropdown'
 import {
   loadAskThreads,
   createAskThread,
@@ -170,24 +171,14 @@ function ScopeSelect({
    *  fuentes — el "2 reuniones ▾" del mock, pero funcional de verdad. */
   citedCount?: number
 }): React.JSX.Element {
-  return (
-    <div className="ask-scope-wrap">
-      <select className="ask-scope-select" value={scope} onChange={(e) => onChange(e.target.value)}>
-        {citedCount ? (
-          <option value="cited">
-            {citedCount} {citedCount === 1 ? 'meeting' : 'meetings'}
-          </option>
-        ) : null}
-        <option value="all">{S.ask.scopeAll}</option>
-        {meetings.map((m) => (
-          <option key={m.clientSessionId} value={m.clientSessionId}>
-            {m.title || 'Untitled meeting'}
-          </option>
-        ))}
-      </select>
-      <span className="ask-scope-chevron">▾</span>
-    </div>
-  )
+  const options: DropdownOption[] = [
+    ...(citedCount
+      ? [{ value: 'cited', label: `${citedCount} ${citedCount === 1 ? 'meeting' : 'meetings'}` }]
+      : []),
+    { value: 'all', label: S.ask.scopeAll },
+    ...meetings.map((m) => ({ value: m.clientSessionId, label: m.title || 'Untitled meeting' })),
+  ]
+  return <Dropdown options={options} value={scope} onChange={onChange} style={{ flexShrink: 0 }} />
 }
 
 function Composer({
@@ -606,6 +597,7 @@ function ConversationView({
 export function AskUyari(): React.JSX.Element {
   const closeAsk = useApp((s) => s.closeAsk)
   const openMeeting = useApp((s) => s.openMeeting)
+  const openSettings = useApp((s) => s.openSettings)
   const auth = useApp((s) => s.auth)
   const flow = useMemo(loadFlow, [])
   const displayName = useMemo(() => deriveDisplayName(auth.email), [auth.email])
@@ -743,6 +735,7 @@ export function AskUyari(): React.JSX.Element {
         wsColorId={flow.wsColor}
         active="ask"
         onHome={closeAsk}
+        onSettings={openSettings}
         askHistory={
           active
             ? {

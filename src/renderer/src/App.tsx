@@ -10,6 +10,7 @@ import { NoteScreen } from '@renderer/screens/note/NoteScreen'
 import { RecordingPill } from '@renderer/components/RecordingPill'
 import { OverlayPill } from '@renderer/screens/OverlayPill'
 import { DetectionBanner } from '@renderer/screens/DetectionBanner'
+import { SettingsModal } from '@renderer/components/SettingsModal'
 
 const QUERY = new URLSearchParams(window.location.search)
 const IS_OVERLAY = QUERY.get('view') === 'overlay'
@@ -54,6 +55,8 @@ function MainApp(): React.JSX.Element {
     noteMinimized,
     restoreNote,
     noteAutoStopped,
+    settingsOpen,
+    closeSettings,
   } = useApp()
   const [ready, setReady] = useState(false)
   const [onboarded, setOnboarded] = useState(() => !FORCE_ONBOARDING && loadFlow().done)
@@ -140,6 +143,9 @@ function MainApp(): React.JSX.Element {
       ) : (
         <Home />
       )}
+      {/* Overlay global: no compite con el router de arriba (openMeetingId/
+          askOpen/session) — se puede abrir desde cualquier pantalla. */}
+      {ready && !showOnboarding && settingsOpen && <SettingsModal onClose={closeSettings} />}
     </ThemeRoot>
   )
 }

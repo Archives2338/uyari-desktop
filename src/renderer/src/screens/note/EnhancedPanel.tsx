@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
 import { dIcon } from '@renderer/ui/chrome'
+import { Dropdown } from '@renderer/components/Dropdown'
 import { NotesEditor } from '@renderer/components/NotesEditor'
 import { mdToHtml, htmlToMd } from '@renderer/lib/markdown'
 import type { MeetingSummary } from '@shared/domain'
@@ -44,7 +45,6 @@ export function EnhancedPanel({
   onSaveContent: (content: string) => void
 }): React.JSX.Element {
   const status = summaryStatus(summary)
-  const [tplOpen, setTplOpen] = useState(false)
   const [checks, setChecks] = useState<Record<number, boolean>>({})
 
   // --- Edición del panel (N5c) ---
@@ -213,21 +213,20 @@ export function EnhancedPanel({
     padding: '7px 12px',
     cursor: 'pointer',
   }
-  const tplLabel = TEMPLATES.find((t) => t.slug === summary?.template)?.label ?? 'General'
   return (
     <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 16 }}>
       {/* toolbar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 12px', position: 'relative', flexWrap: 'wrap' }}>
-        <span
-          onClick={() => setTplOpen((o) => !o)}
-          style={{ ...pill, ...(tplOpen ? { borderColor: 'var(--violet)', boxShadow: '0 0 0 3px var(--focus-ring)' } : {}) }}
-        >
-          <span style={{ display: 'inline-flex', color: 'var(--accent-strong)' }}>
-            {dIcon(['M21 12a9 9 0 1 1-9-9c2.5 0 4.8 1 6.4 2.6L21 8', 'M21 3v5h-5'], 1.8, 15)}
-          </span>
-          Regenerar
-          {dIcon('m6 9 6 6 6-6', 2, 15)}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 12px', flexWrap: 'wrap' }}>
+        <span style={{ display: 'inline-flex', color: 'var(--accent-strong)' }}>
+          {dIcon(['M21 12a9 9 0 1 1-9-9c2.5 0 4.8 1 6.4 2.6L21 8', 'M21 3v5h-5'], 1.8, 15)}
         </span>
+        <Dropdown
+          options={TEMPLATES.map((t) => ({ value: t.slug, label: t.label }))}
+          value={summary?.template ?? 'general'}
+          onChange={(slug) => onRegenerate(slug)}
+          placeholder="Plantilla"
+          align="left"
+        />
         {/* Editado + Restaurar original (aparecen solo si tocaste el resumen) */}
         {edited && original != null && (
           <>
@@ -244,58 +243,6 @@ export function EnhancedPanel({
               Restaurar
             </span>
           </>
-        )}
-        <span style={{ marginLeft: 'auto', font: 'var(--text-xs)', fontSize: 11, color: 'var(--ink-4)' }}>
-          plantilla: {tplLabel}
-        </span>
-        {tplOpen && (
-          <div
-            style={{
-              position: 'absolute',
-              top: 36,
-              left: 0,
-              width: 270,
-              background: 'var(--surface)',
-              border: '1px solid var(--border)',
-              borderRadius: 14,
-              boxShadow: 'var(--shadow-pop)',
-              padding: 8,
-              zIndex: 4,
-            }}
-          >
-            <div style={{ font: 'var(--eyebrow)', fontSize: 10.5, letterSpacing: 'var(--eyebrow-tracking)', color: 'var(--ink-4)', padding: '6px 12px' }}>
-              PLANTILLAS
-            </div>
-            {TEMPLATES.map((t) => (
-              <div
-                key={t.slug}
-                onClick={() => {
-                  setTplOpen(false)
-                  onRegenerate(t.slug)
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  background: t.slug === summary?.template ? 'var(--sidebar, var(--surface-sunken))' : 'transparent',
-                  borderRadius: 9,
-                  padding: '9px 12px',
-                  font: 'var(--label-sm)',
-                  fontSize: 13,
-                  color: 'var(--text-heading)',
-                  cursor: 'pointer',
-                }}
-              >
-                {aiStar(13)}
-                {t.label}
-                {t.slug === summary?.template && (
-                  <span style={{ marginLeft: 'auto', color: 'var(--mint)', display: 'inline-flex' }}>
-                    {dIcon('M20 6 9 17l-5-5', 2.5, 15)}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
         )}
       </div>
 

@@ -58,6 +58,7 @@ export function Sidebar({
   active = 'home',
   onHome,
   onAsk,
+  onSettings,
   askHistory,
 }: {
   workspace: string
@@ -66,6 +67,8 @@ export function Sidebar({
   active?: 'home' | 'shared' | 'ask'
   onHome?: () => void
   onAsk?: () => void
+  /** Abre el modal de Ajustes (overlay global, ver store.settingsOpen). */
+  onSettings?: () => void
   /** En una conversación de "Pregúntale a Uyari": el nav de Spaces/My notes
    *  se reemplaza por el historial Hoy/Ayer (mismo patrón del handoff —
    *  explorations-chat.html CH2, NO es una columna nueva). */
@@ -200,8 +203,18 @@ export function Sidebar({
           />
         </>
       )}
-      <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '4px 6px', cursor: 'pointer' }}>
+      <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {onSettings && (
+          <SideItem
+            icon={i([
+              'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+              'M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z',
+            ])}
+            label="Ajustes"
+            onClick={onSettings}
+          />
+        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '4px 6px', marginTop: 8, cursor: 'pointer' }}>
           <span
             style={{
               width: 26,

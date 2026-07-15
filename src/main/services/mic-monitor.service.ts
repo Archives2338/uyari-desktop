@@ -22,10 +22,27 @@ const MEETING_APPS: Record<string, string> = {
 const BROWSERS: Record<string, string> = {
   'com.google.Chrome': 'Chrome',
   'com.apple.Safari': 'Safari',
+  // Safari captura el mic de las webs en el proceso GPU de WebKit, no en el
+  // bundle de Safari.
+  'com.apple.WebKit.GPU': 'Safari',
   'org.mozilla.firefox': 'Firefox',
   'com.microsoft.edgemac': 'Edge',
   'com.brave.Browser': 'Brave',
   'company.thebrowser.Browser': 'Arc',
+}
+
+/**
+ * Resuelve el bundle "dueño" de un proceso de audio. Los navegadores y las
+ * apps Electron NO capturan en su proceso principal sino en un helper —
+ * Core Audio reporta ESE bundle (visto en vivo: Chrome en Meet aparece como
+ * `com.google.Chrome.helper`, no `com.google.Chrome`; ídem Discord/Slack/
+ * Teams con sus `.helper`). Matching por prefijo contra los bundles conocidos.
+ */
+function ownerBundle(bundleId: string): string {
+  for (const known of [...Object.keys(MEETING_APPS), ...Object.keys(BROWSERS)]) {
+    if (bundleId === known || bundleId.startsWith(known + '.')) return known
+  }
+  return bundleId
 }
 
 // Plataforma del backend por bundle id. Solo mapeamos las tres que el
@@ -106,31 +123,37 @@ export class MicMonitorService {
     for (const bundleId of apps) {
       if (this.active.has(bundleId) || IGNORED.has(bundleId)) continue
 
+      // Resolver el dueño real: Chrome/Discord/Slack/Teams capturan en un
+      // proceso `.helper` — el bundle crudo no matchea los mapas.
+      const owner = ownerBundle(bundleId)
       const label =
-        MEETING_APPS[bundleId] ??
-        (BROWSERS[bundleId] ? `a meeting in ${BROWSERS[bundleId]}` : null)
+        MEETING_APPS[owner] ?? (BROWSERS[owner] ? `a meeting in ${BROWSERS[owner]}` : null)
       if (!label) {
         console.log(`[mic-monitor] ${bundleId} usa el mic (no es app de reunión, ignorada)`)
         continue
       }
 
-      const last = this.lastNotified.get(bundleId) ?? 0
+      // Cooldown por dueño: las variantes de helper del mismo navegador/app
+      // (p.ej. dos procesos de Chrome) no deben re-notificar por separado.
+      const last = this.lastNotified.get(owner) ?? 0
       if (Date.now() - last < RENOTIFY_COOLDOWN_MS) {
-        console.log(`[mic-monitor] ${bundleId} en cooldown de notificación`)
+        console.log(`[mic-monitor] ${owner} en cooldown de notificación`)
         continue
       }
-      this.lastNotified.set(bundleId, Date.now())
+      this.lastNotified.set(owner, Date.now())
       console.log(`[mic-monitor] ${bundleId} empezó a usar el micrófono → ${label}`)
-      this.onMeetingApp({ label, platform: platformFor(bundleId) })
+      this.onMeetingApp({ label, platform: platformFor(owner) })
     }
     this.active = apps
 
     // Señal de presencia (fin de reunión): ¿queda alguna app de reunión o
     // navegador con el mic abierto? Nuestra propia captura está en IGNORED,
     // así que no cuenta. El flip se reporta SIEMPRE (sin cooldown).
-    const hasMeetingApp = [...apps].some(
-      (id) => !IGNORED.has(id) && (MEETING_APPS[id] !== undefined || BROWSERS[id] !== undefined),
-    )
+    const hasMeetingApp = [...apps].some((id) => {
+      if (IGNORED.has(id)) return false
+      const owner = ownerBundle(id)
+      return MEETING_APPS[owner] !== undefined || BROWSERS[owner] !== undefined
+    })
     if (hasMeetingApp !== this.hadMeetingApp) {
       this.hadMeetingApp = hasMeetingApp
       console.log(`[mic-monitor] presencia de app de reunión: ${hasMeetingApp}`)

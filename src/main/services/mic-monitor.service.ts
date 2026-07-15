@@ -52,9 +52,20 @@ export class MicMonitorService {
   private proc: ChildProcessByStdio<Writable, Readable, Readable> | null = null
   private active = new Set<string>()
   private lastNotified = new Map<string, number>()
+  // ¿Hay ALGUNA app de reunión (o navegador en llamada) usando el mic? El
+  // flip true→false es la señal de FIN de reunión (patrón Granola: "left
+  // meeting, considering whether to auto-stop") — la app soltó el micrófono.
+  // OJO: esto NO mide audio (volumen/ruido/silencio no cuentan; mutearse en
+  // Zoom tampoco — Zoom mantiene el mic abierto). Solo cuenta quién tiene
+  // ABIERTO el dispositivo.
+  private hadMeetingApp = false
 
   constructor(
     private readonly onMeetingApp: (info: { label: string; platform: Platform | null }) => void,
+    /** Flip de presencia: true = apareció una app de reunión con el mic,
+     *  false = TODAS lo soltaron (candidato a fin de reunión). Sin cooldown:
+     *  es una señal de estado, no una notificación. */
+    private readonly onMeetingPresence?: (present: boolean) => void,
   ) {}
 
   start(): void {
@@ -113,6 +124,18 @@ export class MicMonitorService {
       this.onMeetingApp({ label, platform: platformFor(bundleId) })
     }
     this.active = apps
+
+    // Señal de presencia (fin de reunión): ¿queda alguna app de reunión o
+    // navegador con el mic abierto? Nuestra propia captura está en IGNORED,
+    // así que no cuenta. El flip se reporta SIEMPRE (sin cooldown).
+    const hasMeetingApp = [...apps].some(
+      (id) => !IGNORED.has(id) && (MEETING_APPS[id] !== undefined || BROWSERS[id] !== undefined),
+    )
+    if (hasMeetingApp !== this.hadMeetingApp) {
+      this.hadMeetingApp = hasMeetingApp
+      console.log(`[mic-monitor] presencia de app de reunión: ${hasMeetingApp}`)
+      this.onMeetingPresence?.(hasMeetingApp)
+    }
   }
 
   stop(): void {

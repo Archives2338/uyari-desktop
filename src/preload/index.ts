@@ -72,6 +72,7 @@ const bridge: UyariBridge = {
     onOpenAsk: subscribe<void>(IPC.evOpenAsk),
     onRestoreNote: subscribe<void>(IPC.evRestoreNote),
     onAutoGenResult: subscribe<AutoGenResult>(IPC.evAutoGenResult),
+    onAutoStopped: subscribe<{ clientSessionId: string }>(IPC.evAutoStopped),
   },
 }
 

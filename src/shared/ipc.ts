@@ -81,6 +81,10 @@ export const IPC = {
   evRestoreNote: 'ev:restore-note',
   /** Resultado de la auto-generación (delay de gracia cumplido). */
   evAutoGenResult: 'ev:auto-gen-result',
+  /** La transcripción se detuvo SOLA (la app de reunión soltó el micrófono).
+   *  Llega ANTES del evSession(null) del stop, para que el renderer abra la
+   *  nota terminada (openMeetingId) en vez de caer al Home. */
+  evAutoStopped: 'ev:auto-stopped',
 } as const
 
 // Superficie que el preload expone como window.uyari.
@@ -181,6 +185,8 @@ export interface UyariBridge {
     onRestoreNote(cb: () => void): () => void
     /** La auto-generación resolvió (queued/skipped/no-credits) tras la gracia. */
     onAutoGenResult(cb: (result: AutoGenResult) => void): () => void
+    /** La transcripción se detuvo sola (fin de reunión por mic-monitor). */
+    onAutoStopped(cb: (info: { clientSessionId: string }) => void): () => void
   }
 }
 

@@ -263,6 +263,9 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
   // montada nunca ve esa transición. La señal en el store sí sobrevive.
   const justEndedId = useApp((s) => s.justEndedId)
   const clearJustEnded = useApp((s) => s.clearJustEnded)
+  // Aviso "se detuvo sola" (fin de reunión por mic-monitor) — descartable.
+  const autoStopped = useApp((s) => s.autoStoppedId === clientSessionId)
+  const clearAutoStopped = useApp((s) => s.clearAutoStopped)
   useEffect(() => {
     if (justEndedId && justEndedId === clientSessionId) {
       // Presupuesto SOLO para la fase CIEGA (antes de que el summary pase a
@@ -542,6 +545,26 @@ export function NoteScreen({ pastId }: { pastId?: string }): React.JSX.Element {
                   {r}
                 </span>
               ))}
+            </div>
+          )}
+
+          {/* Aviso de auto-stop (fin de reunión por mic-monitor): la app de
+              reunión soltó el micrófono y la transcripción se detuvo sola.
+              Informativo y descartable — "Reanudar" sigue al lado por si fue
+              un falso positivo. */}
+          {autoStopped && !capturing && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-pill)', padding: '8px 16px 8px 10px', boxShadow: 'var(--shadow-card)', animation: 'uyariReveal 0.3s var(--ease-out) both' }}>
+              <span
+                onClick={clearAutoStopped}
+                title="Descartar"
+                style={{ display: 'inline-flex', cursor: 'pointer', color: 'var(--ink-3)' }}
+              >
+                {dIcon('M18 6 6 18M6 6l12 12', 1.8, 15)}
+              </span>
+              <span style={{ display: 'inline-flex', width: 7, height: 7, borderRadius: '50%', background: 'var(--mint)' }} />
+              <span style={{ font: 'var(--text-sm)', fontSize: 13, color: 'var(--ink-2)' }}>
+                La reunión terminó — la transcripción se detuvo sola
+              </span>
             </div>
           )}
 

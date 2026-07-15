@@ -172,6 +172,17 @@ if (!app.requestSingleInstanceLock()) {
         }
       },
       onAutoGenResult: (result) => broadcast(IPC.evAutoGenResult, result),
+      onAutoStopped: (info) => {
+        // El aviso llega ANTES del stop (evSession null): el renderer abre la
+        // nota terminada en vez de caer al Home. Y como Granola (primary:show),
+        // traemos la app al frente para que el usuario vea el cierre.
+        broadcast(IPC.evAutoStopped, info)
+        const win = BrowserWindow.getAllWindows().find(isMainWin)
+        if (win) {
+          if (win.isMinimized()) win.restore()
+          win.show()
+        }
+      },
     })
 
     // Auto-detección de reunión: si una app de reuniones enciende el mic y
@@ -200,6 +211,13 @@ if (!app.requestSingleInstanceLock()) {
         if (s && s.status !== 'error') return
         showBanner(label)
       }, BANNER_DELAY_MS)
+    },
+    // Señal INVERSA (fin de reunión): la última app de reunión soltó el mic →
+    // auto-stop con guardas (mín. de sesión + debounce, ver MeetingService);
+    // si una app re-toma el mic durante el debounce, se cancela.
+    (present) => {
+      if (present) meetings.noteMeetingAppBack()
+      else meetings.noteMeetingAppGone()
     })
     monitor.start()
     app.on('before-quit', () => monitor.stop())

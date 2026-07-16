@@ -113,13 +113,20 @@ export interface MeetingListPage {
 // Proyectos: el diferenciador de Granola — agrupan reuniones por "en qué estoy
 // trabajando" y muestran un rollup de pendientes de TODAS sus reuniones juntas.
 
+/** Estado vivo del proyecto (reemplaza el archived boolean). */
+export type ProjectStatus = 'ACTIVE' | 'ON_HOLD' | 'DONE' | 'ARCHIVED'
+
 /** Fila de proyecto para el sidebar (con contadores agregados). */
 export interface ProjectSummary {
   id: string
   name: string
+  /** Contexto libre (semilla de auto-asignación + Ask por proyecto). null = vacío. */
+  description: string | null
   /** Color del chip (slug de token o hex). null = neutral. */
   color: string | null
-  archived: boolean
+  status: ProjectStatus
+  /** Fijado al tope del sidebar. */
+  favorite: boolean
   createdAt: string
   meetingCount: number
   /** Total de action items sumando las reuniones (hoy sin estado abierto/hecho). */
@@ -148,8 +155,10 @@ export interface ProjectRollupItem {
 export interface ProjectDetail {
   id: string
   name: string
+  description: string | null
   color: string | null
-  archived: boolean
+  status: ProjectStatus
+  favorite: boolean
   createdAt: string
   meetings: ProjectDetailMeeting[]
   actionItems: ProjectRollupItem[]

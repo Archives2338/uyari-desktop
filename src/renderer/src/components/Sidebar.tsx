@@ -89,6 +89,8 @@ function ProjectsSection(): React.JSX.Element {
             color={p.color}
             openItems={p.actionItemCount}
             meetings={p.meetingCount}
+            favorite={p.favorite}
+            done={p.status === 'DONE'}
             active={p.id === openProjectId}
             onClick={() => openProject(p.id)}
           />
@@ -159,6 +161,8 @@ function ProjectItem({
   color,
   openItems,
   meetings,
+  favorite,
+  done,
   active,
   onClick,
 }: {
@@ -166,6 +170,8 @@ function ProjectItem({
   color: string | null
   openItems: number
   meetings: number
+  favorite: boolean
+  done: boolean
   active: boolean
   onClick: () => void
 }): React.JSX.Element {
@@ -185,6 +191,8 @@ function ProjectItem({
         background: active || hover ? 'var(--surface-sunken)' : 'transparent',
         font: '500 13px/1.5 var(--font-sans)',
         color: active ? 'var(--text-heading)' : 'var(--ink-2)',
+        // Proyectos "Done" atenuados: siguen visibles pero fuera del foco.
+        opacity: done ? 0.55 : 1,
       }}
     >
       <span
@@ -199,6 +207,11 @@ function ProjectItem({
       <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
         {name}
       </span>
+      {favorite && (
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="var(--accent-strong)" style={{ flexShrink: 0 }}>
+          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+        </svg>
+      )}
       {openItems > 0 && (
         <span
           title={S.project.itemsCount(openItems)}

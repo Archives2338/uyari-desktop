@@ -5,8 +5,8 @@ import { dIcon } from '@renderer/ui/chrome'
 import { Sidebar } from '@renderer/components/Sidebar'
 import { loadFlow } from '@renderer/onboarding/state'
 import { formatRelativeDate } from '@renderer/lib/dates'
-import { S, PLATFORM_LABEL, projectDot } from '@renderer/strings'
-import type { MeetingListItem, ProjectDetail as ProjectDetailData } from '@shared/domain'
+import { S, PLATFORM_LABEL, projectDot, PROJECT_STATUSES, PROJECT_STATUS_LABEL } from '@renderer/strings'
+import type { MeetingListItem, ProjectDetail as ProjectDetailData, ProjectStatus } from '@shared/domain'
 
 // ProjectDetail = el diferenciador de Uyari hecho pantalla. Lo primero que se
 // ve NO es la lista de reuniones (eso es Granola) sino el ROLLUP de pendientes:
@@ -70,10 +70,24 @@ export function ProjectDetail({ projectId }: { projectId: string }): React.JSX.E
     await refreshAll()
   }
 
-  const toggleArchive = async (): Promise<void> => {
+  const setStatus = async (status: ProjectStatus): Promise<void> => {
     setMenuOpen(false)
-    await window.uyari.projects.update(projectId, { archived: !project.archived })
+    if (status === project.status) return
+    await window.uyari.projects.update(projectId, { status })
     await refreshAll()
+  }
+
+  const toggleFavorite = async (): Promise<void> => {
+    setMenuOpen(false)
+    await window.uyari.projects.update(projectId, { favorite: !project.favorite })
+    await refreshAll()
+  }
+
+  const saveDescription = async (description: string): Promise<void> => {
+    const next = description.trim()
+    if (next === (project.description ?? '')) return
+    await window.uyari.projects.update(projectId, { description: next || null })
+    await reload()
   }
 
   const remove = async (): Promise<void> => {
@@ -133,7 +147,8 @@ export function ProjectDetail({ projectId }: { projectId: string }): React.JSX.E
               {project.name}
             </h1>
           )}
-          {project.archived && (
+          <span style={{ flex: 1 }} />
+          {project.status !== 'ACTIVE' && (
             <span
               style={{
                 font: '600 10.5px/1 var(--font-sans)',
@@ -145,10 +160,39 @@ export function ProjectDetail({ projectId }: { projectId: string }): React.JSX.E
                 padding: '4px 8px',
               }}
             >
-              {S.project.archivedTag}
+              {PROJECT_STATUS_LABEL[project.status]}
             </span>
           )}
-          <div style={{ marginLeft: 'auto', position: 'relative' }}>
+          {/* Favorito: estrella clicable en el header. */}
+          <button
+            onClick={() => void toggleFavorite()}
+            title={project.favorite ? S.project.unfavorite : S.project.favorite}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 30,
+              height: 30,
+              borderRadius: 'var(--radius-sm)',
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              color: project.favorite ? 'var(--accent-strong)' : 'var(--ink-4)',
+            }}
+          >
+            <svg
+              width="17"
+              height="17"
+              viewBox="0 0 24 24"
+              fill={project.favorite ? 'currentColor' : 'none'}
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinejoin="round"
+            >
+              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+            </svg>
+          </button>
+          <div style={{ position: 'relative' }}>
             <button
               onClick={() => setMenuOpen((v) => !v)}
               style={{
@@ -174,8 +218,10 @@ export function ProjectDetail({ projectId }: { projectId: string }): React.JSX.E
                     setMenuOpen(false)
                     setRenaming(true)
                   }}
-                  archived={project.archived}
-                  onToggleArchive={() => void toggleArchive()}
+                  status={project.status}
+                  onSetStatus={(s) => void setStatus(s)}
+                  favorite={project.favorite}
+                  onToggleFavorite={() => void toggleFavorite()}
                   onDelete={() => void remove()}
                 />
               </>
@@ -184,9 +230,14 @@ export function ProjectDetail({ projectId }: { projectId: string }): React.JSX.E
         </div>
 
         {/* Meta */}
-        <div style={{ font: 'var(--text-sm)', fontWeight: 400, color: 'var(--ink-4)', margin: '0 0 22px 26px' }}>
+        <div style={{ font: 'var(--text-sm)', fontWeight: 400, color: 'var(--ink-4)', margin: '0 0 12px 26px' }}>
           {S.project.meetingsCount(project.meetings.length)}
           {project.actionItems.length > 0 && <> · {S.project.itemsCount(project.actionItems.length)}</>}
+        </div>
+
+        {/* Descripción editable — contexto libre del proyecto */}
+        <div style={{ margin: '0 0 22px 26px' }}>
+          <DescriptionField initial={project.description ?? ''} onSave={saveDescription} />
         </div>
 
         {/* ROLLUP DE PENDIENTES — el diferenciador, arriba de todo */}
@@ -381,17 +432,23 @@ function Empty({ text }: { text: string }): React.JSX.Element {
 
 function Menu({
   onRename,
-  archived,
-  onToggleArchive,
+  status,
+  onSetStatus,
+  favorite,
+  onToggleFavorite,
   onDelete,
 }: {
   onRename: () => void
-  archived: boolean
-  onToggleArchive: () => void
+  status: ProjectStatus
+  onSetStatus: (s: ProjectStatus) => void
+  favorite: boolean
+  onToggleFavorite: () => void
   onDelete: () => void
 }): React.JSX.Element {
   const item: React.CSSProperties = {
-    display: 'block',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
     width: '100%',
     textAlign: 'left',
     font: 'var(--text-sm)',
@@ -402,6 +459,13 @@ function Menu({
     padding: '8px 12px',
     borderRadius: 'var(--radius-sm)',
   }
+  const divider: React.CSSProperties = { height: 1, background: 'var(--border)', margin: '4px 0' }
+  const heading: React.CSSProperties = {
+    font: 'var(--eyebrow)',
+    letterSpacing: 'var(--eyebrow-tracking)',
+    color: 'var(--ink-4)',
+    padding: '6px 12px 2px',
+  }
   return (
     <div
       style={{
@@ -409,7 +473,7 @@ function Menu({
         top: 34,
         right: 0,
         zIndex: 11,
-        minWidth: 168,
+        minWidth: 184,
         background: 'var(--surface)',
         border: '1px solid var(--border)',
         borderRadius: 'var(--radius-md)',
@@ -420,13 +484,92 @@ function Menu({
       <button style={item} onClick={onRename}>
         {S.project.rename}
       </button>
-      <button style={item} onClick={onToggleArchive}>
-        {archived ? S.project.unarchive : S.project.archive}
+      <button style={item} onClick={onToggleFavorite}>
+        {favorite ? S.project.unfavorite : S.project.favorite}
       </button>
-      <button style={{ ...item, color: 'var(--danger, #E5484D)' }} onClick={onDelete}>
+      <div style={divider} />
+      <div style={heading}>{S.project.statusHeading}</div>
+      {PROJECT_STATUSES.map((s) => (
+        <button key={s} style={item} onClick={() => onSetStatus(s)}>
+          <span style={{ width: 14, display: 'inline-flex', color: 'var(--accent-strong)' }}>
+            {s === status ? dIcon('M20 6L9 17l-5-5', 2, 13) : null}
+          </span>
+          {PROJECT_STATUS_LABEL[s]}
+        </button>
+      ))}
+      <div style={divider} />
+      <button style={{ ...item, color: 'var(--danger)' }} onClick={onDelete}>
         {S.project.delete}
       </button>
     </div>
+  )
+}
+
+// Descripción editable: textarea que crece; guarda al perder foco (patrón de
+// las notas). Vacía muestra el placeholder — sin descripción no ocupa espacio.
+function DescriptionField({
+  initial,
+  onSave,
+}: {
+  initial: string
+  onSave: (value: string) => void
+}): React.JSX.Element {
+  const [value, setValue] = useState(initial)
+  const [editing, setEditing] = useState(false)
+
+  // Reflejar cambios externos (reload) cuando no se está editando.
+  useEffect(() => {
+    if (!editing) setValue(initial)
+  }, [initial, editing])
+
+  if (!editing) {
+    return (
+      <button
+        onClick={() => setEditing(true)}
+        style={{
+          font: 'var(--text-sm)',
+          fontWeight: 400,
+          lineHeight: 1.55,
+          color: value ? 'var(--text-body)' : 'var(--ink-4)',
+          background: 'transparent',
+          border: 'none',
+          cursor: 'text',
+          textAlign: 'left',
+          padding: 0,
+          whiteSpace: 'pre-wrap',
+        }}
+      >
+        {value || S.project.descriptionPlaceholder}
+      </button>
+    )
+  }
+
+  return (
+    <textarea
+      autoFocus
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={() => {
+        setEditing(false)
+        onSave(value)
+      }}
+      placeholder={S.project.descriptionPlaceholder}
+      rows={3}
+      style={{
+        width: '100%',
+        boxSizing: 'border-box',
+        resize: 'vertical',
+        font: 'var(--text-sm)',
+        fontWeight: 400,
+        lineHeight: 1.55,
+        color: 'var(--text-body)',
+        background: 'var(--surface-sunken)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-sm)',
+        outline: 'none',
+        padding: '8px 10px',
+      }}
+    />
   )
 }
 

@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { IPC, type ResumeDescriptor } from '@shared/ipc'
-import type { AuthState } from '@shared/domain'
+import type { AuthState, ProjectStatus } from '@shared/domain'
 import type { ApiClient } from '../services/api.client'
 import type { SettingsStore } from '../services/settings.store'
 import type { MeetingService } from '../services/meeting.service'
@@ -86,14 +86,23 @@ export function registerIpc({ settings, api, meetings, overlay }: Services): voi
   ipcMain.handle(IPC.projectsList, (_e, includeArchived?: boolean) =>
     api.listProjects(includeArchived),
   )
-  ipcMain.handle(IPC.projectsCreate, (_e, name: string, color?: string) =>
-    api.createProject(name, color),
+  ipcMain.handle(IPC.projectsCreate, (_e, name: string, color?: string, description?: string) =>
+    api.createProject(name, color, description),
   )
   ipcMain.handle(IPC.projectsGet, (_e, projectId: string) => api.getProject(projectId))
   ipcMain.handle(
     IPC.projectsUpdate,
-    (_e, projectId: string, patch: { name?: string; color?: string | null; archived?: boolean }) =>
-      api.updateProject(projectId, patch),
+    (
+      _e,
+      projectId: string,
+      patch: {
+        name?: string
+        description?: string | null
+        color?: string | null
+        status?: ProjectStatus
+        favorite?: boolean
+      },
+    ) => api.updateProject(projectId, patch),
   )
   ipcMain.handle(IPC.projectsDelete, (_e, projectId: string) => api.deleteProject(projectId))
 

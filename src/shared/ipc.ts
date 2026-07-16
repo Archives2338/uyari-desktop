@@ -8,6 +8,7 @@ import type {
   PermissionState,
   PermissionsStatus,
   ProjectDetail,
+  ProjectStatus,
   ProjectSummary,
   SessionInfo,
 } from './domain'
@@ -158,13 +159,19 @@ export interface UyariBridge {
     /** Lista los proyectos con contadores (para el sidebar). */
     list(includeArchived?: boolean): Promise<ProjectSummary[]>
     /** Crea un proyecto y devuelve su fila. */
-    create(name: string, color?: string): Promise<ProjectSummary>
+    create(name: string, color?: string, description?: string): Promise<ProjectSummary>
     /** Detalle: reuniones + rollup de action items. */
     get(projectId: string): Promise<ProjectDetail>
-    /** Actualiza nombre / color / archivado (parcial). */
+    /** Actualiza nombre / descripción / color / estado / favorito (parcial). */
     update(
       projectId: string,
-      patch: { name?: string; color?: string | null; archived?: boolean },
+      patch: {
+        name?: string
+        description?: string | null
+        color?: string | null
+        status?: ProjectStatus
+        favorite?: boolean
+      },
     ): Promise<{ ok: boolean }>
     /** Borra el proyecto (las reuniones NO se borran, quedan sin proyecto). */
     remove(projectId: string): Promise<{ ok: boolean }>

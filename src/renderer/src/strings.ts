@@ -164,13 +164,21 @@ export const S = {
     addMeetingEmpty: 'No other meetings to add.',
     remove: 'Remove from project',
     rename: 'Rename',
-    archive: 'Archive',
-    unarchive: 'Unarchive',
     delete: 'Delete project',
     deleteConfirm: 'Delete this project? Its meetings stay — they just leave the project.',
-    archivedTag: 'Archived',
     back: 'Back',
     fromMeeting: 'from',
+    // Descripción (contexto libre del proyecto).
+    descriptionPlaceholder: 'Add a description — what is this project about?',
+    // Estado vivo (reemplaza archivar sí/no).
+    statusHeading: 'Status',
+    statusActive: 'Active',
+    statusOnHold: 'On hold',
+    statusDone: 'Done',
+    statusArchived: 'Archived',
+    // Favorito (fijar al tope del sidebar).
+    favorite: 'Add to favorites',
+    unfavorite: 'Remove from favorites',
   },
   ask: {
     newChat: 'New',
@@ -236,6 +244,15 @@ export const PROJECT_COLORS = [
 ] as const
 
 export const PROJECT_COLOR_NEUTRAL = 'var(--ink-4)'
+
+// Orden y labels de los estados (para el menú del proyecto).
+export const PROJECT_STATUSES = ['ACTIVE', 'ON_HOLD', 'DONE', 'ARCHIVED'] as const
+export const PROJECT_STATUS_LABEL: Record<(typeof PROJECT_STATUSES)[number], string> = {
+  ACTIVE: S.project.statusActive,
+  ON_HOLD: S.project.statusOnHold,
+  DONE: S.project.statusDone,
+  ARCHIVED: S.project.statusArchived,
+}
 
 /** Resuelve el color del punto desde el slug guardado (fallback neutral). */
 export function projectDot(color: string | null | undefined): string {

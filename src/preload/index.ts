@@ -53,7 +53,8 @@ const bridge: UyariBridge = {
   },
   projects: {
     list: (includeArchived) => ipcRenderer.invoke(IPC.projectsList, includeArchived),
-    create: (name, color) => ipcRenderer.invoke(IPC.projectsCreate, name, color),
+    create: (name, color, description) =>
+      ipcRenderer.invoke(IPC.projectsCreate, name, color, description),
     get: (projectId) => ipcRenderer.invoke(IPC.projectsGet, projectId),
     update: (projectId, patch) => ipcRenderer.invoke(IPC.projectsUpdate, projectId, patch),
     remove: (projectId) => ipcRenderer.invoke(IPC.projectsDelete, projectId),

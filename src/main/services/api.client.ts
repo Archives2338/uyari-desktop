@@ -5,6 +5,7 @@ import type {
   MeetingListPage,
   Platform,
   ProjectDetail,
+  ProjectStatus,
   ProjectSummary,
 } from '@shared/domain'
 import type { SettingsStore } from './settings.store'
@@ -252,10 +253,10 @@ export class ApiClient {
   }
 
   /** Crea un proyecto y devuelve su fila (con contadores en 0). */
-  createProject(name: string, color?: string): Promise<ProjectSummary> {
+  createProject(name: string, color?: string, description?: string): Promise<ProjectSummary> {
     return this.request('/projects', {
       method: 'POST',
-      body: JSON.stringify({ name, color }),
+      body: JSON.stringify({ name, color, description }),
     })
   }
 
@@ -264,10 +265,16 @@ export class ApiClient {
     return this.request(`/projects/${projectId}`)
   }
 
-  /** Actualiza nombre / color / archivado (parcial). */
+  /** Actualiza nombre / descripción / color / estado / favorito (parcial). */
   updateProject(
     projectId: string,
-    patch: { name?: string; color?: string | null; archived?: boolean },
+    patch: {
+      name?: string
+      description?: string | null
+      color?: string | null
+      status?: ProjectStatus
+      favorite?: boolean
+    },
   ): Promise<{ ok: boolean }> {
     return this.request(`/projects/${projectId}`, {
       method: 'PATCH',

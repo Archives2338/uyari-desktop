@@ -7,6 +7,8 @@ import type {
   MicControlCmd,
   PermissionState,
   PermissionsStatus,
+  ProjectDetail,
+  ProjectSummary,
   SessionInfo,
 } from './domain'
 
@@ -54,6 +56,14 @@ export const IPC = {
   /** "Pregúntale a Uyari" global — contra el historial, con citas. */
   meetingsAskAll: 'meetings:ask-all',
   meetingsShare: 'meetings:share',
+  /** Asignar / desvincular una reunión a un proyecto. */
+  meetingsAssignProject: 'meetings:assign-project',
+  // Proyectos (el diferenciador: agrupan reuniones + rollup de pendientes)
+  projectsList: 'projects:list',
+  projectsCreate: 'projects:create',
+  projectsGet: 'projects:get',
+  projectsUpdate: 'projects:update',
+  projectsDelete: 'projects:delete',
   // renderer → main (fire-and-forget, alto volumen)
   micChunk: 'mic:chunk',
   micError: 'mic:error',
@@ -141,6 +151,23 @@ export interface UyariBridge {
     ): Promise<AskAllResponse>
     /** Activa el link público de solo-lectura y devuelve la URL. */
     share(clientSessionId: string): Promise<{ url: string }>
+    /** Asigna (o desvincula, con projectId=null) la reunión a un proyecto. */
+    assignProject(clientSessionId: string, projectId: string | null): Promise<{ ok: boolean }>
+  }
+  projects: {
+    /** Lista los proyectos con contadores (para el sidebar). */
+    list(includeArchived?: boolean): Promise<ProjectSummary[]>
+    /** Crea un proyecto y devuelve su fila. */
+    create(name: string, color?: string): Promise<ProjectSummary>
+    /** Detalle: reuniones + rollup de action items. */
+    get(projectId: string): Promise<ProjectDetail>
+    /** Actualiza nombre / color / archivado (parcial). */
+    update(
+      projectId: string,
+      patch: { name?: string; color?: string | null; archived?: boolean },
+    ): Promise<{ ok: boolean }>
+    /** Borra el proyecto (las reuniones NO se borran, quedan sin proyecto). */
+    remove(projectId: string): Promise<{ ok: boolean }>
   }
   mic: {
     /** PCM16 mono al sample rate pedido por el main. */

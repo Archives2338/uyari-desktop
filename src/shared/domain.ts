@@ -101,11 +101,58 @@ export interface MeetingListItem {
   endedAt?: string | null
   summaryStatus: SummaryStatus | null
   segmentCount: number
+  /** Proyecto al que pertenece (null = sin proyecto). Ver Project. */
+  projectId?: string | null
 }
 
 export interface MeetingListPage {
   items: MeetingListItem[]
   nextCursor: string | null
+}
+
+// Proyectos: el diferenciador de Granola — agrupan reuniones por "en qué estoy
+// trabajando" y muestran un rollup de pendientes de TODAS sus reuniones juntas.
+
+/** Fila de proyecto para el sidebar (con contadores agregados). */
+export interface ProjectSummary {
+  id: string
+  name: string
+  /** Color del chip (slug de token o hex). null = neutral. */
+  color: string | null
+  archived: boolean
+  createdAt: string
+  meetingCount: number
+  /** Total de action items sumando las reuniones (hoy sin estado abierto/hecho). */
+  actionItemCount: number
+}
+
+/** Reunión dentro del detalle de un proyecto. */
+export interface ProjectDetailMeeting {
+  clientSessionId: string
+  title: string | null
+  platform: Platform
+  startedAt: string
+  endedAt: string | null
+  summaryStatus: SummaryStatus | null
+  actionItemCount: number
+}
+
+/** Un pendiente del rollup, con trazabilidad a su reunión de origen. */
+export interface ProjectRollupItem {
+  meetingClientSessionId: string
+  meetingTitle: string | null
+  text: string
+}
+
+/** Detalle del proyecto: reuniones + rollup de action items. */
+export interface ProjectDetail {
+  id: string
+  name: string
+  color: string | null
+  archived: boolean
+  createdAt: string
+  meetings: ProjectDetailMeeting[]
+  actionItems: ProjectRollupItem[]
 }
 
 // "Pregúntale a Uyari" global (chat, no ligado a una reunión abierta).

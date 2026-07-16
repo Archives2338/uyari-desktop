@@ -127,6 +127,10 @@ export const S = {
     spaces: 'SPACES',
     myNotes: 'My notes',
     addFolder: 'Add folder',
+    projects: 'PROJECTS',
+    newProject: 'New project',
+    newProjectPlaceholder: 'Project name…',
+    projectsEmpty: 'Group meetings into a project to track its open items.',
     calendarTeaserTitle: 'See your meetings here',
     calendarTeaserSub:
       "Link a calendar and Uyari will show today's agenda, join reminders and notes — automatically.",
@@ -145,6 +149,28 @@ export const S = {
     detected: 'seems to be in a meeting.',
     startRecording: 'Start recording',
     dismiss: 'Dismiss',
+  },
+  project: {
+    // Rollup de pendientes — el diferenciador. Granola deja los action items
+    // atrapados dentro de cada nota; acá se juntan por proyecto.
+    openItems: 'Open items',
+    openItemsEmpty: 'No open items yet — they roll up here from every meeting in this project.',
+    meetings: 'Meetings',
+    meetingsEmpty: 'No meetings in this project yet.',
+    meetingsCount: (n: number): string => `${n} meeting${n === 1 ? '' : 's'}`,
+    itemsCount: (n: number): string => `${n} open item${n === 1 ? '' : 's'}`,
+    addMeeting: 'Add meeting',
+    addMeetingTitle: 'Add a meeting to this project',
+    addMeetingEmpty: 'No other meetings to add.',
+    remove: 'Remove from project',
+    rename: 'Rename',
+    archive: 'Archive',
+    unarchive: 'Unarchive',
+    delete: 'Delete project',
+    deleteConfirm: 'Delete this project? Its meetings stay — they just leave the project.',
+    archivedTag: 'Archived',
+    back: 'Back',
+    fromMeeting: 'from',
   },
   ask: {
     newChat: 'New',
@@ -197,3 +223,22 @@ export const WS_COLORS = [
 ] as const
 
 export type WsColorId = (typeof WS_COLORS)[number]['id']
+
+// Paleta de colores para el punto del proyecto en el sidebar. Project.color
+// guarda el `id` (slug); `dot` es el color pintado. Sin color → neutral.
+export const PROJECT_COLORS = [
+  { id: 'violet', dot: 'var(--violet)' },
+  { id: 'blue', dot: '#4C7DF0' },
+  { id: 'mint', dot: '#3BB88F' },
+  { id: 'amber', dot: '#E0A030' },
+  { id: 'rose', dot: '#E5657F' },
+  { id: 'slate', dot: '#8A8AA0' },
+] as const
+
+export const PROJECT_COLOR_NEUTRAL = 'var(--ink-4)'
+
+/** Resuelve el color del punto desde el slug guardado (fallback neutral). */
+export function projectDot(color: string | null | undefined): string {
+  if (!color) return PROJECT_COLOR_NEUTRAL
+  return PROJECT_COLORS.find((c) => c.id === color)?.dot ?? color
+}

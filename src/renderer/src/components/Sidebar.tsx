@@ -1,6 +1,7 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { dIcon, fIcon, useHover } from '@renderer/ui/chrome'
-import { S, WS_COLORS } from '@renderer/strings'
+import { S, WS_COLORS, PROJECT_COLORS, projectDot } from '@renderer/strings'
+import { useApp } from '@renderer/store'
 
 // Shell de la app (search, nav, spaces, switcher de workspace) — compartido
 // por todas las pantallas post-onboarding (Home, MeetingDetail, ...).
@@ -41,6 +42,256 @@ function SideItem({
         {icon}
       </span>
       {label}
+    </div>
+  )
+}
+
+// Sección PROYECTOS — el diferenciador. Consume el store directamente (así
+// las pantallas que montan el Sidebar no tienen que pasar props de proyectos).
+function ProjectsSection(): React.JSX.Element {
+  const projects = useApp((s) => s.projects)
+  const openProjectId = useApp((s) => s.openProjectId)
+  const openProject = useApp((s) => s.openProject)
+  const loadProjects = useApp((s) => s.loadProjects)
+  const [creating, setCreating] = useState(false)
+
+  useEffect(() => {
+    void loadProjects()
+  }, [loadProjects])
+
+  const eyebrowRow: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '16px 6px 6px 10px',
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div style={eyebrowRow}>
+        <span
+          style={{
+            font: 'var(--eyebrow)',
+            letterSpacing: 'var(--eyebrow-tracking)',
+            color: 'var(--ink-4)',
+          }}
+        >
+          {S.home.projects}
+        </span>
+        <AddProjectButton onClick={() => setCreating(true)} />
+      </div>
+
+      <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 1 }}>
+        {projects.map((p) => (
+          <ProjectItem
+            key={p.id}
+            name={p.name}
+            color={p.color}
+            openItems={p.actionItemCount}
+            meetings={p.meetingCount}
+            active={p.id === openProjectId}
+            onClick={() => openProject(p.id)}
+          />
+        ))}
+
+        {creating && (
+          <NewProjectInput
+            onCancel={() => setCreating(false)}
+            onDone={async (name, color) => {
+              setCreating(false)
+              try {
+                const created = await window.uyari.projects.create(name, color)
+                await loadProjects()
+                openProject(created.id)
+              } catch {
+                // Backend caído: no rompas el sidebar, el usuario reintenta.
+              }
+            }}
+          />
+        )}
+
+        {projects.length === 0 && !creating && (
+          <span
+            style={{
+              font: 'var(--text-xs)',
+              fontWeight: 400,
+              color: 'var(--ink-4)',
+              lineHeight: 1.5,
+              padding: '4px 10px 0',
+            }}
+          >
+            {S.home.projectsEmpty}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function AddProjectButton({ onClick }: { onClick: () => void }): React.JSX.Element {
+  const [hover, hoverProps] = useHover()
+  return (
+    <span
+      {...hoverProps}
+      onClick={onClick}
+      title={S.home.newProject}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 20,
+        height: 20,
+        borderRadius: 'var(--radius-sm)',
+        cursor: 'pointer',
+        color: 'var(--ink-4)',
+        background: hover ? 'var(--surface-sunken)' : 'transparent',
+      }}
+    >
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+        <path d="M12 5v14M5 12h14" />
+      </svg>
+    </span>
+  )
+}
+
+function ProjectItem({
+  name,
+  color,
+  openItems,
+  meetings,
+  active,
+  onClick,
+}: {
+  name: string
+  color: string | null
+  openItems: number
+  meetings: number
+  active: boolean
+  onClick: () => void
+}): React.JSX.Element {
+  const [hover, hoverProps] = useHover()
+  return (
+    <div
+      {...hoverProps}
+      onClick={onClick}
+      title={S.project.meetingsCount(meetings)}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 9,
+        padding: '6px 10px',
+        borderRadius: 'var(--radius-sm)',
+        cursor: 'pointer',
+        background: active || hover ? 'var(--surface-sunken)' : 'transparent',
+        font: '500 13px/1.5 var(--font-sans)',
+        color: active ? 'var(--text-heading)' : 'var(--ink-2)',
+      }}
+    >
+      <span
+        style={{
+          width: 9,
+          height: 9,
+          borderRadius: 3,
+          background: projectDot(color),
+          flexShrink: 0,
+        }}
+      />
+      <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {name}
+      </span>
+      {openItems > 0 && (
+        <span
+          title={S.project.itemsCount(openItems)}
+          style={{
+            font: '600 10.5px/1 var(--font-sans)',
+            color: 'var(--accent-strong)',
+            background: 'var(--violet-wash)',
+            borderRadius: 'var(--radius-pill)',
+            padding: '3px 6px',
+            minWidth: 8,
+            textAlign: 'center',
+          }}
+        >
+          {openItems}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function NewProjectInput({
+  onDone,
+  onCancel,
+}: {
+  onDone: (name: string, color: string) => void
+  onCancel: () => void
+}): React.JSX.Element {
+  const [name, setName] = useState('')
+  const [color, setColor] = useState<string>(PROJECT_COLORS[0].id)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  const submit = (): void => {
+    const trimmed = name.trim()
+    if (trimmed) onDone(trimmed, color)
+    else onCancel()
+  }
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        padding: '8px 10px',
+        borderRadius: 'var(--radius-sm)',
+        background: 'var(--surface-sunken)',
+      }}
+    >
+      <input
+        ref={inputRef}
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') submit()
+          else if (e.key === 'Escape') onCancel()
+        }}
+        onBlur={submit}
+        placeholder={S.home.newProjectPlaceholder}
+        style={{
+          font: '500 13px/1.4 var(--font-sans)',
+          color: 'var(--text-heading)',
+          background: 'transparent',
+          border: 'none',
+          outline: 'none',
+          padding: 0,
+        }}
+      />
+      <div style={{ display: 'flex', gap: 6 }}>
+        {PROJECT_COLORS.map((c) => (
+          <span
+            key={c.id}
+            // onMouseDown (no onClick): el onBlur del input dispara antes que el
+            // click y cerraría el creador — mousedown gana la carrera.
+            onMouseDown={(e) => {
+              e.preventDefault()
+              setColor(c.id)
+            }}
+            style={{
+              width: 15,
+              height: 15,
+              borderRadius: 5,
+              background: c.dot,
+              cursor: 'pointer',
+              boxSizing: 'border-box',
+              border: color === c.id ? '2px solid var(--text-heading)' : '2px solid transparent',
+            }}
+          />
+        ))}
+      </div>
     </div>
   )
 }
@@ -176,32 +427,7 @@ export function Sidebar({
           ))}
         </div>
       ) : (
-        <>
-          <div
-            style={{
-              font: 'var(--eyebrow)',
-              letterSpacing: 'var(--eyebrow-tracking)',
-              color: 'var(--ink-4)',
-              padding: '16px 10px 6px',
-            }}
-          >
-            {S.home.spaces}
-          </div>
-          <SideItem
-            icon={f(
-              'M208,88H48a16,16,0,0,0-16,16v96a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V104A16,16,0,0,0,208,88Zm0,112H48V104H208v96ZM48,64a8,8,0,0,1,8-8H200a8,8,0,0,1,0,16H56A8,8,0,0,1,48,64ZM64,32a8,8,0,0,1,8-8H184a8,8,0,0,1,0,16H72A8,8,0,0,1,64,32Z',
-            )}
-            label={S.home.myNotes}
-          />
-          <SideItem
-            icon={i([
-              'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
-              'M12 11v6M9 14h6',
-            ])}
-            label={S.home.addFolder}
-            indent
-          />
-        </>
+        <ProjectsSection />
       )}
       <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
         {onSettings && (

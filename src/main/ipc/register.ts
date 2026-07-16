@@ -76,6 +76,26 @@ export function registerIpc({ settings, api, meetings, overlay }: Services): voi
       api.askAll(question, meetingIds, history),
   )
   ipcMain.handle(IPC.meetingsShare, (_e, clientSessionId: string) => api.share(clientSessionId))
+  ipcMain.handle(
+    IPC.meetingsAssignProject,
+    (_e, clientSessionId: string, projectId: string | null) =>
+      api.assignMeetingToProject(clientSessionId, projectId),
+  )
+
+  // Proyectos (el diferenciador: agrupan reuniones + rollup de pendientes).
+  ipcMain.handle(IPC.projectsList, (_e, includeArchived?: boolean) =>
+    api.listProjects(includeArchived),
+  )
+  ipcMain.handle(IPC.projectsCreate, (_e, name: string, color?: string) =>
+    api.createProject(name, color),
+  )
+  ipcMain.handle(IPC.projectsGet, (_e, projectId: string) => api.getProject(projectId))
+  ipcMain.handle(
+    IPC.projectsUpdate,
+    (_e, projectId: string, patch: { name?: string; color?: string | null; archived?: boolean }) =>
+      api.updateProject(projectId, patch),
+  )
+  ipcMain.handle(IPC.projectsDelete, (_e, projectId: string) => api.deleteProject(projectId))
 
   // Audio del mic: alto volumen, fire-and-forget (send, no invoke).
   ipcMain.on(IPC.micChunk, (_e, chunk: ArrayBuffer) => meetings.acceptAudio(chunk))

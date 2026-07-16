@@ -48,6 +48,15 @@ const bridge: UyariBridge = {
     askAll: (question, meetingIds, history) =>
       ipcRenderer.invoke(IPC.meetingsAskAll, question, meetingIds, history),
     share: (clientSessionId) => ipcRenderer.invoke(IPC.meetingsShare, clientSessionId),
+    assignProject: (clientSessionId, projectId) =>
+      ipcRenderer.invoke(IPC.meetingsAssignProject, clientSessionId, projectId),
+  },
+  projects: {
+    list: (includeArchived) => ipcRenderer.invoke(IPC.projectsList, includeArchived),
+    create: (name, color) => ipcRenderer.invoke(IPC.projectsCreate, name, color),
+    get: (projectId) => ipcRenderer.invoke(IPC.projectsGet, projectId),
+    update: (projectId, patch) => ipcRenderer.invoke(IPC.projectsUpdate, projectId, patch),
+    remove: (projectId) => ipcRenderer.invoke(IPC.projectsDelete, projectId),
   },
   mic: {
     chunk: (data) => ipcRenderer.send(IPC.micChunk, data),

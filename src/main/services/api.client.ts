@@ -4,6 +4,8 @@ import type {
   MeetingDetailData,
   MeetingListPage,
   Platform,
+  ProjectDetail,
+  ProjectSummary,
 } from '@shared/domain'
 import type { SettingsStore } from './settings.store'
 
@@ -239,5 +241,53 @@ export class ApiClient {
   /** Activa (idempotente) el link público y devuelve la URL para compartir. */
   share(clientSessionId: string): Promise<{ url: string }> {
     return this.request(`/meetings/${clientSessionId}/share`, { method: 'POST', body: '{}' })
+  }
+
+  // --- Proyectos (el diferenciador: agrupan reuniones + rollup de pendientes) ---
+
+  /** Lista los proyectos del usuario con contadores (para el sidebar). */
+  listProjects(includeArchived = false): Promise<ProjectSummary[]> {
+    const suffix = includeArchived ? '?includeArchived=true' : ''
+    return this.request(`/projects${suffix}`)
+  }
+
+  /** Crea un proyecto y devuelve su fila (con contadores en 0). */
+  createProject(name: string, color?: string): Promise<ProjectSummary> {
+    return this.request('/projects', {
+      method: 'POST',
+      body: JSON.stringify({ name, color }),
+    })
+  }
+
+  /** Detalle: reuniones del proyecto + rollup de action items. */
+  getProject(projectId: string): Promise<ProjectDetail> {
+    return this.request(`/projects/${projectId}`)
+  }
+
+  /** Actualiza nombre / color / archivado (parcial). */
+  updateProject(
+    projectId: string,
+    patch: { name?: string; color?: string | null; archived?: boolean },
+  ): Promise<{ ok: boolean }> {
+    return this.request(`/projects/${projectId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    })
+  }
+
+  /** Borra el proyecto (las reuniones NO se borran, quedan sin proyecto). */
+  deleteProject(projectId: string): Promise<{ ok: boolean }> {
+    return this.request(`/projects/${projectId}`, { method: 'DELETE' })
+  }
+
+  /** Asigna (o desvincula, con projectId=null) una reunión a un proyecto. */
+  assignMeetingToProject(
+    clientSessionId: string,
+    projectId: string | null,
+  ): Promise<{ ok: boolean }> {
+    return this.request(`/meetings/${clientSessionId}/project`, {
+      method: 'PUT',
+      body: JSON.stringify({ projectId }),
+    })
   }
 }

@@ -45,6 +45,8 @@ export const DESK_DARK: Record<string, string> = {
   '--shadow-card': '0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35)',
   '--shadow-float': '0 2px 6px rgba(0,0,0,0.35), 0 24px 64px rgba(0,0,0,0.5)',
   '--shadow-pop': '0 4px 12px rgba(0,0,0,0.35), 0 32px 80px rgba(0,0,0,0.5)',
+  '--danger': '#F2555A',
+  '--scrim': 'rgba(0, 0, 0, 0.55)',
 }
 
 /** Derivación light a partir de un tono de papel (hoy fijo en PAPER_DEFAULT;

@@ -6,6 +6,7 @@ import { OnboardingFlow } from '@renderer/onboarding/Flow'
 import { loadFlow } from '@renderer/onboarding/state'
 import { Home } from '@renderer/screens/Home'
 import { AskUyari } from '@renderer/screens/AskUyari'
+import { ProjectDetail } from '@renderer/screens/ProjectDetail'
 import { NoteScreen } from '@renderer/screens/note/NoteScreen'
 import { RecordingPill } from '@renderer/components/RecordingPill'
 import { OverlayPill } from '@renderer/screens/OverlayPill'
@@ -49,6 +50,7 @@ function MainApp(): React.JSX.Element {
     setSession,
     setDetectedMeeting,
     openMeetingId,
+    openProjectId,
     askOpen,
     openAsk,
     session,
@@ -135,6 +137,8 @@ function MainApp(): React.JSX.Element {
         // Reunión terminada → la MISMA pantalla de nota, en modo pasado
         // (documento único de Granola): notas + tab "Notas de Uyari".
         <NoteScreen key={openMeetingId} pastId={openMeetingId} />
+      ) : openProjectId ? (
+        <ProjectDetail key={openProjectId} projectId={openProjectId} />
       ) : askOpen ? (
         <AskUyari />
       ) : session && !noteMinimized ? (

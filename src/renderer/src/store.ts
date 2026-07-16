@@ -1,5 +1,11 @@
 import { create } from 'zustand'
-import type { AuthState, CaptionSegment, PermissionsStatus, SessionInfo } from '@shared/domain'
+import type {
+  AuthState,
+  CaptionSegment,
+  PermissionsStatus,
+  ProjectSummary,
+  SessionInfo,
+} from '@shared/domain'
 
 // Estado global del renderer. Espejo de lo que reporta el main vía bridge;
 // no contiene lógica de negocio, solo estado de UI.
@@ -13,6 +19,10 @@ interface AppStore {
   detectedMeeting: string | null
   /** clientSessionId abierto en MeetingDetail; null = se ve el Home. */
   openMeetingId: string | null
+  /** id de proyecto abierto en ProjectDetail; null = no se ve un proyecto. */
+  openProjectId: string | null
+  /** Proyectos del usuario (espejo del backend, para el sidebar). */
+  projects: ProjectSummary[]
   /** "Pregúntale a Uyari" (chat global) está abierto. */
   askOpen: boolean
   /** Modal de Ajustes abierto (overlay global, no compite con openMeetingId/askOpen). */
@@ -58,6 +68,12 @@ interface AppStore {
   setDetectedMeeting(label: string | null): void
   openMeeting(clientSessionId: string): void
   closeMeeting(): void
+  /** Refresca la lista de proyectos desde el backend (sidebar). */
+  loadProjects(): Promise<void>
+  /** Abre el detalle de un proyecto (excluyente con la nota/ask, como openMeeting). */
+  openProject(projectId: string): void
+  /** Cierra el detalle de proyecto (vuelve al Home). */
+  closeProject(): void
   openAsk(): void
   closeAsk(): void
   openSettings(): void
@@ -83,6 +99,8 @@ export const useApp = create<AppStore>((set, get) => ({
   captions: [],
   detectedMeeting: null,
   openMeetingId: null,
+  openProjectId: null,
+  projects: [],
   askOpen: false,
   settingsOpen: false,
   noteMinimized: false,
@@ -172,11 +190,24 @@ export const useApp = create<AppStore>((set, get) => ({
 
   setDetectedMeeting: (label) => set({ detectedMeeting: label }),
 
-  // openMeetingId, askOpen: dos "pantallas" mutuamente excluyentes sobre el
-  // Home — abrir una cierra la otra (mismo patrón que un router simple).
-  openMeeting: (clientSessionId) => set({ openMeetingId: clientSessionId, askOpen: false }),
+  // openMeetingId, openProjectId, askOpen: "pantallas" mutuamente excluyentes
+  // sobre el Home — abrir una cierra las otras (router simple por estado).
+  openMeeting: (clientSessionId) =>
+    set({ openMeetingId: clientSessionId, openProjectId: null, askOpen: false }),
   closeMeeting: () => set({ openMeetingId: null }),
-  openAsk: () => set({ openMeetingId: null, askOpen: true }),
+
+  loadProjects: async () => {
+    try {
+      set({ projects: await window.uyari.projects.list() })
+    } catch {
+      // Backend caído o sin sesión: el sidebar sigue usable sin proyectos.
+    }
+  },
+  openProject: (projectId) =>
+    set({ openProjectId: projectId, openMeetingId: null, askOpen: false }),
+  closeProject: () => set({ openProjectId: null }),
+
+  openAsk: () => set({ openMeetingId: null, openProjectId: null, askOpen: true }),
   closeAsk: () => set({ askOpen: false }),
   // Overlay global: no toca openMeetingId/askOpen (se puede abrir desde
   // cualquier pantalla sin perder dónde estabas).

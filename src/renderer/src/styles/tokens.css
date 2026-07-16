@@ -72,6 +72,10 @@
   --accent-strong: var(--violet-strong);
   --success: var(--mint);
 
+  /* Destructivo (borrar) + scrim de modales — canónicos del handoff. */
+  --danger: #E5484D;
+  --scrim: rgba(20, 18, 30, 0.32);
+
   --focus-ring: rgba(132, 116, 196, 0.45);
 }
 :root {
